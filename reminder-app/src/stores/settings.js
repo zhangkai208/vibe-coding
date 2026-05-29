@@ -8,12 +8,52 @@ export const useSettingsStore = defineStore('settings', () => {
   // 关闭到托盘
   const closeToTray = ref(true)
 
+  // 工作时段
+  const workingHours = ref({
+    enabled: false,
+    start: '09:00',
+    end: '18:00',
+    weekdays: [1, 2, 3, 4, 5]
+  })
+
+  // 声音设置
+  const sound = ref({
+    enabled: true,
+    volume: 0.7
+  })
+
+  // 空闲阈值（秒）
+  const idleThreshold = ref(300)
+
+  // 提醒默认值
+  const reminderDefaults = ref({
+    autoClose: true,
+    autoCloseDelay: 30,
+    soundEnabled: true,
+    postponeMinutes: 5
+  })
+
   // 从 electron-store 加载设置
   async function loadSettings() {
     if (window.electronAPI) {
       const settings = await window.electronAPI.getSettings()
+
       autoLaunch.value = settings.autoLaunch ?? false
       closeToTray.value = settings.closeToTray ?? true
+
+      if (settings.workingHours) {
+        workingHours.value = { ...workingHours.value, ...settings.workingHours }
+      }
+      if (settings.sound) {
+        sound.value = { ...sound.value, ...settings.sound }
+      }
+      if (settings.idleThreshold !== undefined) {
+        idleThreshold.value = settings.idleThreshold
+      }
+      if (settings.reminderDefaults) {
+        reminderDefaults.value = { ...reminderDefaults.value, ...settings.reminderDefaults }
+      }
+
       return settings
     }
     return null
@@ -25,6 +65,10 @@ export const useSettingsStore = defineStore('settings', () => {
       await window.electronAPI.saveSettings({
         autoLaunch: autoLaunch.value,
         closeToTray: closeToTray.value,
+        workingHours: workingHours.value,
+        sound: sound.value,
+        idleThreshold: idleThreshold.value,
+        reminderDefaults: reminderDefaults.value,
         ...settings
       })
     }
@@ -41,6 +85,10 @@ export const useSettingsStore = defineStore('settings', () => {
   return {
     autoLaunch,
     closeToTray,
+    workingHours,
+    sound,
+    idleThreshold,
+    reminderDefaults,
     loadSettings,
     saveSettings,
     setAutoLaunch

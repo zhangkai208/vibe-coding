@@ -18,19 +18,27 @@ const form = ref({
   content: '',
   interval: 30,
   autoClose: true,
-  autoCloseDelay: 10
+  autoCloseDelay: 30,
+  soundEnabled: true
 })
 
 // 监听 reminder 变化，填充表单
 watch(() => props.reminder, (newVal) => {
   if (newVal) {
-    form.value = { ...newVal }
+    form.value = {
+      content: newVal.content || '',
+      interval: newVal.interval || 30,
+      autoClose: newVal.autoClose ?? true,
+      autoCloseDelay: newVal.autoCloseDelay || 30,
+      soundEnabled: newVal.soundEnabled ?? true
+    }
   } else {
     form.value = {
       content: '',
       interval: 30,
       autoClose: true,
-      autoCloseDelay: 10
+      autoCloseDelay: 30,
+      soundEnabled: true
     }
   }
 }, { immediate: true })
@@ -40,9 +48,7 @@ function handleClose() {
 }
 
 function handleSubmit() {
-  if (!form.value.content.trim()) {
-    return
-  }
+  if (!form.value.content.trim()) return
   emit('save', { ...form.value })
 }
 </script>
@@ -54,7 +60,7 @@ function handleSubmit() {
     width="90%"
     @close="handleClose"
   >
-    <el-form :model="form" label-position="top">
+    <el-form :model="form" label-position="top" size="small">
       <el-form-item label="提醒内容" required>
         <el-input
           v-model="form.content"
@@ -81,8 +87,13 @@ function handleSubmit() {
         <el-input-number
           v-model="form.autoCloseDelay"
           :min="5"
-          :max="60"
+          :max="120"
+          :step="5"
         />
+      </el-form-item>
+
+      <el-form-item label="提醒声音">
+        <el-switch v-model="form.soundEnabled" />
       </el-form-item>
     </el-form>
 

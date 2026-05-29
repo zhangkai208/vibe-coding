@@ -14,6 +14,9 @@ export const usePetStore = defineStore('pet', () => {
   // 位置
   const position = ref({ x: 50, y: 0 })
 
+  // 好感度衰减定时器
+  let decayTimer = null
+
   // 计算心情表情
   const moodEmoji = computed(() => {
     const emojis = {
@@ -23,6 +26,16 @@ export const usePetStore = defineStore('pet', () => {
       angry: '😠'
     }
     return emojis[mood.value]
+  })
+
+  // 好感度描述
+  const happinessDesc = computed(() => {
+    const h = happiness.value
+    if (h >= 80) return '非常开心！'
+    if (h >= 60) return '心情不错~'
+    if (h >= 40) return '还不错吧'
+    if (h >= 20) return '有点不开心...'
+    return '很不高兴！'
   })
 
   // 用户响应提醒（开心）
@@ -60,15 +73,37 @@ export const usePetStore = defineStore('pet', () => {
     position.value = { x, y }
   }
 
+  // 启动好感度衰减（每小时 -1）
+  function startHappinessDecay() {
+    stopHappinessDecay()
+    decayTimer = setInterval(() => {
+      if (happiness.value > 0) {
+        happiness.value = Math.max(0, happiness.value - 1)
+        updateMood()
+      }
+    }, 60 * 60 * 1000) // 每小时 -1
+  }
+
+  // 停止好感度衰减
+  function stopHappinessDecay() {
+    if (decayTimer) {
+      clearInterval(decayTimer)
+      decayTimer = null
+    }
+  }
+
   return {
     mood,
     happiness,
     displayMode,
     position,
     moodEmoji,
+    happinessDesc,
     onResponseReminder,
     onIgnoreReminder,
     setDisplayMode,
-    setPosition
+    setPosition,
+    startHappinessDecay,
+    stopHappinessDecay
   }
 })

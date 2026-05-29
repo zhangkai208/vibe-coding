@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(tasklist)"
+      "Bash(tasklist)",
+      "WebSearch",
+      "Bash(cp -r src/assets/live2d/model/22/* public/models/22/)",
+      "Bash(cp -r src/assets/live2d/model/33/* public/models/33/)",
+      "Bash(curl -sL \"https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js\" -o public/lib/live2d.min.js)",
+      "Bash(node -e ' *)",
+      "Bash(npx vite *)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(kill %1)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('icons-vue:', p.dependencies['@element-plus/icons-vue'] || 'NOT FOUND'\\)\")"
     ]
   }
 }

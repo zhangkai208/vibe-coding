@@ -5,24 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Live2D Pet</title>
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      html, body {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: transparent;
-      }
-      #app {
-        width: 100%;
-        height: 100%;
-      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+      #app { width: 100%; height: 100%; }
     </style>
-    <!-- Cubism 2/4 运行时 -->
+    <!-- Cubism 2 运行时 -->
     <script src="https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"></script>
+    <!-- Cubism 4 运行时（pixi-live2d-display 强制要求） -->
     <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
   </head>
   <body>
