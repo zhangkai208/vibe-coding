@@ -18,6 +18,8 @@ let mainWindow = null
 let petWindow = null
 // 托盘图标
 let tray = null
+// 是否正在退出应用（区分“真正退出”和“关闭按钮最小化到托盘”）
+let isQuitting = false
 
 // 创建主窗口
 function createMainWindow() {
@@ -44,10 +46,10 @@ function createMainWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
-  // 关闭时最小化到托盘
+  // 关闭时最小化到托盘（除非正在退出）
   mainWindow.on('close', (event) => {
     const settings = store.get('settings', {})
-    if (settings.closeToTray !== false) {
+    if (!isQuitting && settings.closeToTray !== false) {
       event.preventDefault()
       mainWindow.hide()
     }
@@ -200,9 +202,8 @@ function updateTrayMenu() {
     {
       label: '退出',
       click: () => {
-        mainWindow = null
-        petWindow = null
-        tray = null
+        // 标记正在退出：close 事件据此放行（真正关闭），不再 hide 已 null 的窗口
+        isQuitting = true
         app.quit()
       }
     }
