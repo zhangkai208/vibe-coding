@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, watch, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import TitleBar from '@/components/TitleBar.vue'
 import { useReminderStore } from '@/stores/reminder'
 import { usePetStore } from '@/stores/pet'
 import { useSettingsStore } from '@/stores/settings'
@@ -163,7 +164,10 @@ watch(() => reminderStore.globalPaused, () => {
 
 <template>
   <div class="app-container">
-    <router-view />
+    <TitleBar />
+    <div class="app-content">
+      <router-view />
+    </div>
   </div>
 </template>
 
@@ -171,5 +175,15 @@ watch(() => reminderStore.globalPaused, () => {
 .app-container {
   width: 100%;
   height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 </style>

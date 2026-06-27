@@ -16,12 +16,6 @@ export const useSettingsStore = defineStore('settings', () => {
     weekdays: [1, 2, 3, 4, 5]
   })
 
-  // 声音设置
-  const sound = ref({
-    enabled: true,
-    volume: 0.7
-  })
-
   // 空闲阈值（秒）
   const idleThreshold = ref(300)
 
@@ -29,7 +23,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const reminderDefaults = ref({
     autoClose: true,
     autoCloseDelay: 30,
-    soundEnabled: true,
     postponeMinutes: 5
   })
 
@@ -43,9 +36,6 @@ export const useSettingsStore = defineStore('settings', () => {
 
       if (settings.workingHours) {
         workingHours.value = { ...workingHours.value, ...settings.workingHours }
-      }
-      if (settings.sound) {
-        sound.value = { ...sound.value, ...settings.sound }
       }
       if (settings.idleThreshold !== undefined) {
         idleThreshold.value = settings.idleThreshold
@@ -62,15 +52,18 @@ export const useSettingsStore = defineStore('settings', () => {
   // 保存设置到 electron-store
   async function saveSettings(settings) {
     if (window.electronAPI) {
-      await window.electronAPI.saveSettings({
+      const payload = {
         autoLaunch: autoLaunch.value,
         closeToTray: closeToTray.value,
         workingHours: workingHours.value,
-        sound: sound.value,
         idleThreshold: idleThreshold.value,
         reminderDefaults: reminderDefaults.value,
         ...settings
-      })
+      }
+      // 关键修复：workingHours/reminderDefaults 是 Vue 响应式对象（Proxy），
+      // Electron IPC 用结构化克隆传输，Proxy 不可克隆会抛 "An object could not be cloned"，
+      // 导致保存静默失败。必须先深拷贝成纯对象再发送。
+      await window.electronAPI.saveSettings(JSON.parse(JSON.stringify(payload)))
     }
   }
 
@@ -86,7 +79,6 @@ export const useSettingsStore = defineStore('settings', () => {
     autoLaunch,
     closeToTray,
     workingHours,
-    sound,
     idleThreshold,
     reminderDefaults,
     loadSettings,

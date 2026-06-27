@@ -12,24 +12,6 @@ const isTemporarilyShown = ref(false)
 const leftPetRef = ref(null)
 const rightPetRef = ref(null)
 
-let notificationAudio = null
-
-function initSound() {
-  try {
-    notificationAudio = new Audio('./sounds/notification.wav')
-    notificationAudio.volume = 0.7
-  } catch {}
-}
-
-function playSound(soundId) {
-  if (!notificationAudio) return
-  try {
-    notificationAudio.currentTime = 0
-    notificationAudio.volume = settingsStore.sound.volume || 0.7
-    notificationAudio.play().catch(() => {})
-  } catch {}
-}
-
 // 鼠标穿透控制：当鼠标在宠物/气泡上时允许交互，其他区域穿透
 function handleMouseMove(e) {
   const el = document.elementFromPoint(e.clientX, e.clientY)
@@ -71,8 +53,6 @@ function handleIPCMessage(event, data) {
     const position = data.position || 'left'
     const pet = position === 'left' ? leftPetRef.value : rightPetRef.value
     if (pet) pet.triggerPreview()
-  } else if (data.type === 'play-sound') {
-    playSound(data.soundId)
   }
 }
 
@@ -86,8 +66,6 @@ function onBubbleClosed() {
 }
 
 onMounted(async () => {
-  initSound()
-
   // 监听鼠标移动实现穿透控制
   document.addEventListener('mousemove', handleMouseMove)
 

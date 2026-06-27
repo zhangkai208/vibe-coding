@@ -34,8 +34,7 @@ function handlePresetAdd(preset) {
     content: preset.content,
     interval: preset.interval,
     autoClose: settingsStore.reminderDefaults.autoClose,
-    autoCloseDelay: settingsStore.reminderDefaults.autoCloseDelay,
-    soundEnabled: settingsStore.reminderDefaults.soundEnabled
+    autoCloseDelay: settingsStore.reminderDefaults.autoCloseDelay
   })
   const count = reminderStore.reminders.length
   reminderStore.updateReminder(reminder.id, {
@@ -53,11 +52,8 @@ async function handleSave(reminder) {
   if (editingReminder.value) {
     reminderStore.updateReminder(editingReminder.value.id, reminder)
   } else {
-    const newReminder = reminderStore.addReminder(reminder)
-    const count = reminderStore.reminders.length
-    reminderStore.updateReminder(newReminder.id, {
-      position: count % 2 === 0 ? 'left' : 'right'
-    })
+    // position 由表单决定（addReminder 会读取 reminder.position）
+    reminderStore.addReminder(reminder)
   }
   showAddDialog.value = false
   await saveReminders()
@@ -171,7 +167,7 @@ async function saveReminders() {
 
 <style scoped>
 .home {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: linear-gradient(168deg, var(--bg-warm) 0%, var(--bg-cream) 50%, #FFF0F5 100%);

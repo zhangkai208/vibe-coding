@@ -9,9 +9,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development node electron/dev.js\"",
     "electron:build": "vite build && electron-builder",
-    "electron:preview": "cross-env NODE_ENV=production electron ."
+    "electron:preview": "cross-env NODE_ENV=production node electron/dev.js"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
@@ -44,7 +44,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/icon.ico"
+      "icon": "public/icon.png"
     },
     "nsis": {
       "oneClick": false,

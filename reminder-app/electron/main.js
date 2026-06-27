@@ -5,6 +5,13 @@ const Store = require('electron-store')
 // 初始化本地存储
 const store = new Store()
 
+// 应用图标路径：dev 用 public/，打包后用 dist/（vite 构建时已把 public 复制到 dist）
+const isDev = process.env.NODE_ENV === 'development'
+const iconPath = path.join(__dirname, isDev ? '../public/icon.png' : '../dist/icon.png')
+
+// 开机自启时由 setLoginItemSettings 的 args 注入 --hidden，据此静默启动（不弹出主窗口）
+const startHidden = process.argv.includes('--hidden')
+
 // 主窗口
 let mainWindow = null
 // 宠物窗口
@@ -19,7 +26,8 @@ function createMainWindow() {
     height: 640,
     resizable: false,
     show: false,
-    frame: true,
+    frame: false,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -46,7 +54,10 @@ function createMainWindow() {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    // 开机自启（--hidden）时不显示主窗口，隐藏到托盘；由托盘点击唤出
+    if (!startHidden) {
+      mainWindow.show()
+    }
   })
 }
 
@@ -101,7 +112,6 @@ function createPetWindow() {
 // 创建托盘图标
 function createTray() {
   // 尝试加载图标文件
-  const iconPath = path.join(__dirname, '../public/icon.ico')
   let icon
   try {
     icon = nativeImage.createFromPath(iconPath)
@@ -229,6 +239,16 @@ function getNextReminderInfo(settings) {
 
 // ===== IPC 通信处理 =====
 
+// ===== 自定义标题栏：窗口控制 =====
+ipcMain.on('window-minimize', () => {
+  if (mainWindow) mainWindow.minimize()
+})
+
+ipcMain.on('window-close', () => {
+  // 复用下面的 close 事件处理（依 closeToTray 决定隐藏到托盘还是真正关闭）
+  if (mainWindow) mainWindow.close()
+})
+
 // 获取设置
 ipcMain.handle('get-settings', () => {
   return store.get('settings', {
@@ -248,15 +268,10 @@ ipcMain.handle('get-settings', () => {
       end: '18:00',
       weekdays: [1, 2, 3, 4, 5]
     },
-    sound: {
-      enabled: true,
-      volume: 0.7
-    },
     idleThreshold: 300,
     reminderDefaults: {
       autoClose: true,
       autoCloseDelay: 30,
-      soundEnabled: true,
       postponeMinutes: 5
     }
   })
@@ -298,7 +313,9 @@ function deepMerge(target, source) {
 ipcMain.handle('set-auto-launch', (_event, enable) => {
   app.setLoginItemSettings({
     openAtLogin: enable,
-    openAsHidden: true
+    openAsHidden: true,
+    // Windows 上注入 --hidden，启动时据此静默隐藏主窗口
+    args: ['--hidden']
   })
   return true
 })
@@ -376,18 +393,6 @@ ipcMain.on('reminder-ignored', (_event, reminderId) => {
   }
 })
 
-// ===== 声音播放 =====
-
-ipcMain.on('play-sound', (_event, soundId) => {
-  // 在宠物窗口中播放声音（它有完整的渲染环境）
-  if (petWindow) {
-    petWindow.webContents.send('pet-message', {
-      type: 'play-sound',
-      soundId: soundId
-    })
-  }
-})
-
 // ===== 空闲检测 =====
 
 ipcMain.handle('get-idle-time', () => {
@@ -434,7 +439,8 @@ app.whenReady().then(() => {
   if (settings.autoLaunch) {
     app.setLoginItemSettings({
       openAtLogin: true,
-      openAsHidden: true
+      openAsHidden: true,
+      args: ['--hidden']
     })
   }
 })

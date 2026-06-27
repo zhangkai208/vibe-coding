@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useSettingsStore } from './settings'
+import { isWithinWorkingHours } from '@/utils/time'
 
 // 调度器 Tick 间隔（毫秒）
 const TICK_INTERVAL = 10 * 1000 // 10 秒，兼顾精度和性能
@@ -62,7 +64,6 @@ export const useReminderStore = defineStore('reminder', () => {
       autoClose: reminder.autoClose ?? true,
       autoCloseDelay: reminder.autoCloseDelay || 30,
       enabled: reminder.enabled ?? true,
-      soundEnabled: reminder.soundEnabled ?? true,
       position: reminder.position || 'left',
       lastTriggered: null
     }
@@ -108,6 +109,13 @@ export const useReminderStore = defineStore('reminder', () => {
   // 调度器 Tick
   function schedulerTick() {
     if (globalPaused.value || isIdle.value) return
+
+    // 工作时段：开关打开、且当前不在选定的工作日/时段内时，不预告也不触发
+    const settingsStore = useSettingsStore()
+    if (
+      settingsStore.workingHours.enabled &&
+      !isWithinWorkingHours(settingsStore.workingHours)
+    ) return
 
     const now = Date.now()
 
@@ -158,11 +166,6 @@ export const useReminderStore = defineStore('reminder', () => {
         autoCloseDelay: reminder.autoCloseDelay,
         position: reminder.position
       })
-    }
-
-    // 播放声音
-    if (reminder.soundEnabled && window.electronAPI?.playSound) {
-      window.electronAPI.playSound('notification')
     }
   }
 

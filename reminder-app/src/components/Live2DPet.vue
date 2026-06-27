@@ -15,6 +15,8 @@ const props = defineProps({
   }
 })
 
+const emit = defineEmits(['bubble-closed'])
+
 const petStore = usePetStore()
 const container = ref(null)
 const canvas = ref(null)
@@ -180,8 +182,11 @@ function triggerPreview() {
   }
 }
 
-// 气泡事件
-function onBubbleClose() { isSpeaking.value = false }
+// 气泡事件 —— 关闭后通知父组件，用于「仅提醒时」模式下隐藏宠物
+function onBubbleClose() {
+  isSpeaking.value = false
+  emit('bubble-closed')
+}
 
 function onBubbleAcknowledge(reminderId) {
   if (window.electronAPI?.acknowledgeReminder) {
@@ -189,6 +194,7 @@ function onBubbleAcknowledge(reminderId) {
   }
   isSpeaking.value = false
   if (model.value) model.value.motion('thanking')
+  emit('bubble-closed')
 }
 
 function onBubblePostpone(reminderId) {
@@ -196,6 +202,7 @@ function onBubblePostpone(reminderId) {
     window.electronAPI.postponeReminder({ reminderId, delay: 5 })
   }
   isSpeaking.value = false
+  emit('bubble-closed')
 }
 
 function onBubbleAutoExpire(reminderId) {
@@ -203,6 +210,7 @@ function onBubbleAutoExpire(reminderId) {
     window.electronAPI.ignoreReminder(reminderId)
   }
   isSpeaking.value = false
+  emit('bubble-closed')
 }
 
 watch(() => petStore.mood, (newMood) => {

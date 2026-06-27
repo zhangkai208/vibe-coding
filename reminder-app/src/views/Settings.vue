@@ -31,10 +31,6 @@ async function handleDisplayModeChange() {
   }
 }
 
-async function handleSoundChange() {
-  await settingsStore.saveSettings({ sound: { ...settingsStore.sound } })
-}
-
 async function handleWorkingHoursChange() {
   await settingsStore.saveSettings({ workingHours: { ...settingsStore.workingHours } })
 }
@@ -167,26 +163,6 @@ function toggleWeekday(val) {
         </div>
       </div>
 
-      <!-- 通知设置 -->
-      <div class="setting-card">
-        <div class="card-header">
-          <span class="card-dot dot-mint"></span>
-          <span class="card-title">通知设置</span>
-        </div>
-        <div class="card-body">
-          <div class="setting-row">
-            <span class="setting-label">提醒声音</span>
-            <div class="setting-control">
-              <el-switch v-model="settingsStore.sound.enabled" @change="handleSoundChange" />
-            </div>
-          </div>
-          <div v-if="settingsStore.sound.enabled" class="setting-row column">
-            <span class="setting-label">音量</span>
-            <el-slider v-model="settingsStore.sound.volume" :min="0" :max="1" :step="0.1" :format-tooltip="(val) => Math.round(val * 100) + '%'" @change="handleSoundChange" />
-          </div>
-        </div>
-      </div>
-
       <!-- 应用设置 -->
       <div class="setting-card">
         <div class="card-header">
@@ -225,7 +201,7 @@ function toggleWeekday(val) {
 
 <style scoped>
 .settings {
-  height: 100vh;
+  height: 100%;
   background: linear-gradient(168deg, var(--bg-warm) 0%, var(--bg-cream) 50%, #FFF0F5 100%);
   overflow-y: auto;
   box-sizing: border-box;

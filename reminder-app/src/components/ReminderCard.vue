@@ -41,7 +41,7 @@ function confirmDelete() {
         <span class="tag tag-interval">{{ formatInterval(reminder.interval) }}</span>
         <span v-if="reminder.autoClose" class="tag tag-auto">{{ reminder.autoCloseDelay }}s</span>
         <span :class="['tag', reminder.position === 'left' ? 'tag-left' : 'tag-right']">
-          {{ reminder.position === 'left' ? 'L' : 'R' }}
+          {{ reminder.position === 'left' ? '左' : '右' }}
         </span>
       </div>
     </div>

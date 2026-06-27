@@ -25,9 +25,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   postponeReminder: (data) => ipcRenderer.send('reminder-postponed', data),
   ignoreReminder: (reminderId) => ipcRenderer.send('reminder-ignored', reminderId),
 
-  // ===== 声音 =====
-  playSound: (soundId) => ipcRenderer.send('play-sound', soundId),
-
   // ===== 鼠标穿透控制 =====
   setPetInteractable: (interactable) => ipcRenderer.send('set-pet-interactable', interactable),
 
@@ -93,6 +90,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       triggerNextReminderCallback = null
     }
   },
+
+  // ===== 自定义标题栏：窗口控制 =====
+  minimizeWindow: () => ipcRenderer.send('window-minimize'),
+  closeWindow: () => ipcRenderer.send('window-close'),
 
   // ===== 平台信息 =====
   platform: process.platform
