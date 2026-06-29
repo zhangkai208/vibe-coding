@@ -10,7 +10,9 @@
 | **Live2D 萌妹宠物** | 使用开源 Live2D 模型，会呼吸、眨眼、表情变化 |
 | **宠物说话提醒** | 由宠物来说话提醒，比冷冰冰的弹窗更温馨有趣 |
 | **灵活显示模式** | 可选：常驻桌面 / 仅提醒时出现 |
-| **心情系统** | 按时响应提醒→宠物开心，忽略→宠物难过/生气 |
+| **服装更换** | 左右两只宠物各自可切换 19 套服装（圣诞/校服/夏装等） |
+| **宠物大小调整** | 滑块无极调节宠物大小（左右共同，0.2~0.5） |
+| **心情系统** | 确认提醒→开心，忽略→难过/生气；四档情绪循环轮换 |
 
 ## 需求确认
 
@@ -43,7 +45,6 @@
 | 声音提醒 | 宠物视觉提醒足够 |
 | 统计功能 | 用户不需要 |
 | 历史记录 | 用户不需要 |
-| 复杂数值养成 | 保持简单心情系统即可 |
 
 ## 技术栈
 
@@ -88,20 +89,18 @@ model/
 
 ### 加载方式
 
+**本地优先、CDN 兜底**：模型资源已下载到 `public/models/{22,33}/`，运行时优先从本地加载（离线可用、更快），本地失败再回退 CDN。服装切换通过加载不同的 `model.*.json`（共用同一 `.moc`、只换 `closet.*` 服装贴图）实现。
+
 ```javascript
-// 左下角宠物
-const leftPet = await Live2DModel.from(
-  'https://cdn.jsdelivr.net/gh/imuncle/live2d/model/22/model.default.json'
-)
+const modelDir = position === 'left' ? '22' : '33'
+const localUrl = `./models/${modelDir}/${skinFile}`
+const cdnUrl   = `https://cdn.jsdelivr.net/gh/imuncle/live2d/model/${modelDir}/${skinFile}`
 
-// 右下角宠物
-const rightPet = await Live2DModel.from(
-  'https://cdn.jsdelivr.net/gh/imuncle/live2d/model/33/model.default.json'
-)
-
-// 或本地加载（打包时）
-const leftPet = await Live2DModel.from('/assets/live2d/model/22/model.default.json')
-const rightPet = await Live2DModel.from('/assets/live2d/model/33/model.default.json')
+try {
+  model = await Live2DModel.from(localUrl)   // 本地优先（离线也可用）
+} catch {
+  model = await Live2DModel.from(cdnUrl)     // 本地失败再走 CDN 兜底
+}
 ```
 
 ## 数据结构设计
@@ -124,10 +123,12 @@ interface Reminder {
 
 ```typescript
 interface PetState {
-  mood: 'happy' | 'normal' | 'sad' | 'angry'  // 心情状态
-  happiness: number         // 快乐值 0-100
+  mood: 'happy' | 'normal' | 'sad' | 'angry'  // 心情状态（阈值 75/50/25 四等分）
+  happiness: number         // 快乐值 0-100（确认重置到 95，每 20 秒 -1）
   displayMode: 'always' | 'reminder-only'    // 显示模式
   position: { x: number, y: number }         // 桌面位置
+  skins: { left: string, right: string }     // 左/右宠物服装 id（见 constants/skins.js）
+  petScale: number                            // 宠物大小 0.2~0.5（左右共同）
 }
 ```
 
@@ -135,11 +136,23 @@ interface PetState {
 
 ```typescript
 interface Settings {
-  reminders: Reminder[]     // 提醒列表
-  pet: PetState             // 宠物状态
-  globalPaused: boolean     // 全局暂停
-  autoLaunch: boolean       // 开机自启
-  closeToTray: boolean      // 关闭时最小化到托盘
+  reminders: Reminder[]          // 提醒列表
+  pet: PetState                  // 宠物状态
+  globalPaused: boolean          // 全局暂停
+  autoLaunch: boolean            // 开机自启
+  closeToTray: boolean           // 关闭时最小化到托盘
+  workingHours: {                // 工作时段
+    enabled: boolean
+    start: string                // '09:00'
+    end: string                  // '18:00'
+    weekdays: number[]           // [1,2,3,4,5]
+  }
+  idleThreshold: number          // 空闲阈值（秒）
+  reminderDefaults: {            // 提醒默认值
+    autoClose: boolean
+    autoCloseDelay: number       // 秒
+    postponeMinutes: number
+  }
 }
 ```
 
@@ -148,41 +161,39 @@ interface Settings {
 ```
 reminder-app/
 ├── electron/
-│   ├── main.js             # Electron 主进程
-│   ├── preload.js          # 预加载脚本（IPC 桥接）
-│   └── tray.js             # 托盘管理
+│   ├── main.js             # 主进程（窗口/托盘/IPC/存储/空闲检测）
+│   ├── preload.js          # IPC 桥接
+│   └── dev.js              # 开发环境启动入口
 ├── src/
+│   ├── main.js             # 主窗口 Vue 入口（index.html）
+│   ├── pet-main.js         # 宠物窗口 Vue 入口（pet.html）
+│   ├── App.vue             # 主窗口根组件
+│   ├── PetApp.vue          # 宠物窗口根组件
+│   ├── router/index.js     # 主窗口路由（hash history）
 │   ├── views/
 │   │   ├── Home.vue        # 主页（提醒列表）
-│   │   └── Settings.vue    # 全局设置页面
+│   │   └── Settings.vue    # 设置页
 │   ├── components/
-│   │   ├── Live2DPet.vue       # Live2D 宠物组件（通用）
+│   │   ├── Live2DPet.vue       # Live2D 宠物组件
 │   │   ├── SpeechBubble.vue    # 宠物对话气泡
-│   │   ├── ReminderCard.vue    # 单个提醒卡片
-│   │   └── AddReminder.vue     # 添加/编辑提醒弹窗
+│   │   ├── ReminderCard.vue    # 提醒卡片
+│   │   ├── AddReminder.vue     # 添加/编辑提醒弹窗
+│   │   └── TitleBar.vue        # 自定义标题栏
 │   ├── stores/
-│   │   ├── reminder.js     # 提醒状态管理
-│   │   ├── pet.js          # 宠物状态管理（心情、位置）
-│   │   └── settings.js     # 设置状态管理
-│   ├── utils/
-│   │   ├── timer.js        # 定时器工具
-│   │   └── live2d.js       # Live2D 工具函数
-│   ├── assets/
-│   │   └── live2d/         # Live2D 模型资源
-│   │       └── model/
-│   │           ├── 22/     # 左下角宠物模型
-│   │           │   ├── model.default.json
-│   │           │   ├── model.moc
-│   │           │   └── textures/
-│   │           └── 33/     # 右下角宠物模型
-│   │               ├── model.default.json
-│   │               ├── model.moc
-│   │               └── textures/
-│   ├── App.vue
-│   └── main.js
+│   │   ├── reminder.js     # 提醒状态 + 调度器
+│   │   ├── pet.js          # 宠物状态（心情/服装/大小）
+│   │   └── settings.js     # 设置状态
+│   ├── constants/
+│   │   ├── skins.js        # 服装清单（22/33 共用 19 套）
+│   │   └── presets.js      # 预设提醒
+│   └── utils/time.js       # 时间工具
+├── public/
+│   ├── icon.png            # 应用图标
+│   └── models/{22,33}/     # Live2D 模型资源（本地优先加载）
+├── index.html              # 主窗口入口
+├── pet.html                # 宠物窗口入口（透明置顶）
 ├── package.json
-├── vite.config.js
-└── electron-builder.json   # 打包配置
+└── vite.config.js          # 多入口构建（index + pet）
 ```
 
 ## 页面设计
@@ -196,10 +207,14 @@ reminder-app/
 - 宠物显示模式切换
 
 ### 2. 设置页面 (Settings.vue)
-- 开机自启开关
-- 关闭到托盘开关
-- 宠物显示模式（常驻/仅提醒时）
-- 关于信息
+- 宠物显示模式（常驻 / 仅提醒时）
+- 好感度展示
+- 左 / 右宠物服装选择（各 19 套）
+- 宠物大小滑块（左右共同，0.2~0.5）
+- 工作时段（工作日 + 起止时间）
+- 推迟时长
+- 开机自启 / 关闭到托盘
+- 空闲阈值
 
 ### 3. Live2D 宠物组件 (Live2DPet.vue)
 - 渲染 Live2D 模型
@@ -293,7 +308,7 @@ async function loadModel() {
     autoStart: true,
   })
 
-  model.value = await Live2DModel.from('https://cdn.jsdelivr.net/gh/imuncle/live2d/model/shizuku/shizuku.model.json')
+  model.value = await Live2DModel.from('./models/22/model.default.json')  // 本地优先（22/33 各一套）
   app.stage.addChild(model.value)
 
   // 默认空闲动画
@@ -323,34 +338,40 @@ function setMood(mood) {
 
 ### 心情系统
 ```javascript
-// src/stores/pet.js
-export const usePetStore = defineStore('pet', {
-  state: () => ({
-    mood: 'normal',
-    happiness: 50,
-  }),
+// src/stores/pet.js —— 心情系统（四档循环轮换，让用户体会每种情绪）
+// 节奏：每 30~45 分钟确认一次，一个周期内 happy→normal→sad→angry 各约 8 分钟
+const happiness = ref(50)
+const mood = ref('normal')
 
-  actions: {
-    // 用户响应提醒（开心）
-    onResponseReminder() {
-      this.happiness = Math.min(100, this.happiness + 10)
-      this.updateMood()
-    },
+// 确认提醒 → 重置到高位，从 happy 重新衰减
+function onResponseReminder() {
+  happiness.value = 95
+  updateMood()
+}
 
-    // 用户忽略提醒（难过）
-    onIgnoreReminder() {
-      this.happiness = Math.max(0, this.happiness - 15)
-      this.updateMood()
-    },
+// 忽略提醒 → 扣分（下限 0）
+function onIgnoreReminder() {
+  happiness.value = Math.max(0, happiness.value - 15)
+  updateMood()
+}
 
-    updateMood() {
-      if (this.happiness >= 70) this.mood = 'happy'
-      else if (this.happiness >= 40) this.mood = 'normal'
-      else if (this.happiness >= 20) this.mood = 'sad'
-      else this.mood = 'angry'
+// 阈值四等分，确保四种情绪都有等量区间
+function updateMood() {
+  if (happiness.value >= 75) mood.value = 'happy'
+  else if (happiness.value >= 50) mood.value = 'normal'
+  else if (happiness.value >= 25) mood.value = 'sad'
+  else mood.value = 'angry'
+}
+
+// 自然衰减：每 20 秒 -1（≈每分钟 -3），最低扣到 0
+function startHappinessDecay() {
+  setInterval(() => {
+    if (happiness.value > 0) {
+      happiness.value = Math.max(0, happiness.value - 1)
+      updateMood()
     }
-  }
-})
+  }, 20 * 1000)
+}
 ```
 
 ### 透明窗口配置
@@ -418,22 +439,27 @@ ipcMain.handle('set-auto-launch', (event, enable) => {
 
 | 文件 | 用途 |
 |------|------|
-| electron/main.js | Electron 主进程 |
+| electron/main.js | 主进程（窗口/托盘/IPC/存储/空闲检测） |
 | electron/preload.js | IPC 桥接 |
-| electron/tray.js | 托盘管理 |
-| src/main.js | Vue 入口 |
-| src/App.vue | 根组件 |
+| electron/dev.js | 开发环境启动 |
+| src/main.js | 主窗口 Vue 入口 |
+| src/pet-main.js | 宠物窗口 Vue 入口 |
+| src/App.vue | 主窗口根组件 |
+| src/PetApp.vue | 宠物窗口根组件 |
+| src/router/index.js | 主窗口路由 |
 | src/views/Home.vue | 主页 |
 | src/views/Settings.vue | 设置页 |
 | src/components/Live2DPet.vue | Live2D 宠物组件 |
 | src/components/SpeechBubble.vue | 对话气泡 |
 | src/components/ReminderCard.vue | 提醒卡片 |
-| src/components/AddReminder.vue | 添加提醒 |
-| src/stores/reminder.js | 提醒状态 |
-| src/stores/pet.js | 宠物状态（心情） |
+| src/components/AddReminder.vue | 添加/编辑提醒 |
+| src/components/TitleBar.vue | 自定义标题栏 |
+| src/stores/reminder.js | 提醒状态 + 调度器 |
+| src/stores/pet.js | 宠物状态（心情/服装/大小） |
 | src/stores/settings.js | 设置状态 |
-| src/utils/timer.js | 定时器工具 |
-| src/utils/live2d.js | Live2D 工具 |
-| src/assets/live2d/* | Live2D 模型资源 |
-| package.json | 依赖配置 |
-| vite.config.js | Vite 配置 |
+| src/constants/skins.js | 服装清单（22/33 共用） |
+| src/constants/presets.js | 预设提醒 |
+| src/utils/time.js | 时间工具 |
+| public/models/{22,33} | Live2D 模型资源（本地优先加载） |
+| index.html / pet.html | 双窗口入口 |
+| package.json / vite.config.js | 依赖与多入口构建配置 |
