@@ -102,6 +102,9 @@ onMounted(async () => {
         right: settings.pet.skins.right ?? 'default'
       }
     }
+    if (settings.pet.petScale !== undefined) {
+      petStore.petScale = settings.pet.petScale
+    }
     petStore.updateMood?.()
   }
 

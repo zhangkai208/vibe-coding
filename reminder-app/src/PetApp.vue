@@ -17,6 +17,7 @@ const rightPetRef = ref(null)
 const ready = ref(false)
 const leftSkinFile = ref('model.default.json')
 const rightSkinFile = ref('model.default.json')
+const petScale = ref(0.3)
 
 // 鼠标穿透控制：当鼠标在宠物/气泡上时允许交互，其他区域穿透
 function handleMouseMove(e) {
@@ -56,6 +57,8 @@ function handleIPCMessage(event, data) {
     // 主窗口切换了某侧宠物的服装，更新 skinFile 触发 Live2DPet 重载
     if (data.position === 'left') leftSkinFile.value = data.file
     else if (data.position === 'right') rightSkinFile.value = data.file
+  } else if (data.type === 'set-scale') {
+    petScale.value = data.scale
   } else if (data.type === 'sync-pet-state') {
     if (data.happiness !== undefined) petStore.happiness = data.happiness
     if (data.mood !== undefined) petStore.mood = data.mood
@@ -89,6 +92,9 @@ onMounted(async () => {
       const skins = settings.pet.skins || {}
       leftSkinFile.value = skinToFile(skins.left)
       rightSkinFile.value = skinToFile(skins.right)
+      if (settings.pet.petScale !== undefined) {
+        petScale.value = settings.pet.petScale
+      }
     }
   } catch {}
   ready.value = true
@@ -115,6 +121,7 @@ onUnmounted(() => {
       position="left"
       model-path="model/22"
       :skin-file="leftSkinFile"
+      :pet-scale="petScale"
       @bubble-closed="onBubbleClosed"
     />
 
@@ -125,6 +132,7 @@ onUnmounted(() => {
       position="right"
       model-path="model/33"
       :skin-file="rightSkinFile"
+      :pet-scale="petScale"
       @bubble-closed="onBubbleClosed"
     />
   </div>

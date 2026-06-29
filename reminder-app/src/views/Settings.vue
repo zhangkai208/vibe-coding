@@ -50,6 +50,22 @@ async function handleSkinChange(positionKey) {
   }
 }
 
+async function handleScaleChange() {
+  await settingsStore.saveSettings({
+    pet: {
+      mood: petStore.mood,
+      happiness: petStore.happiness,
+      displayMode: petStore.displayMode,
+      position: petStore.position,
+      skins: { ...petStore.skins },
+      petScale: petStore.petScale
+    }
+  })
+  if (window.electronAPI?.setPetScale) {
+    window.electronAPI.setPetScale(petStore.petScale)
+  }
+}
+
 async function handleWorkingHoursChange() {
   await settingsStore.saveSettings({ workingHours: { ...settingsStore.workingHours } })
 }
@@ -139,6 +155,17 @@ function toggleWeekday(val) {
                 <option v-for="s in SKINS" :key="s.id" :value="s.id">{{ s.name }}</option>
               </select>
             </div>
+          </div>
+          <div class="setting-row column">
+            <span class="setting-label">宠物大小（左右共同）</span>
+            <el-slider
+              v-model="petStore.petScale"
+              :min="0.2"
+              :max="0.5"
+              :step="0.01"
+              :show-tooltip="false"
+              @change="handleScaleChange"
+            />
           </div>
         </div>
       </div>

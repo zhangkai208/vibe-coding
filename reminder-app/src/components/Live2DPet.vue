@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import * as PIXI from 'pixi.js'
 import SpeechBubble from './SpeechBubble.vue'
 import { usePetStore } from '@/stores/pet'
@@ -16,10 +16,19 @@ const props = defineProps({
   skinFile: {
     type: String,
     default: 'model.default.json'
+  },
+  petScale: {
+    type: Number,
+    default: 0.3
   }
 })
 
 const emit = defineEmits(['bubble-closed'])
+
+// 整体缩放：以 BASE_SCALE 为画布内基准，petScale 的变化交给容器 CSS transform 处理，
+// 让「模型」和「四周透明占位框」同步缩放，避免缩放后模型变小、固定透明框残留的违和感。
+const BASE_SCALE = 0.3
+const containerScale = computed(() => props.petScale / BASE_SCALE)
 
 const petStore = usePetStore()
 const container = ref(null)
@@ -112,7 +121,7 @@ function applyModel(loadedModel) {
   model.value = loadedModel
   pixiApp.value.stage.addChild(model.value)
   model.value.anchor.set(0.5, 0.5)
-  model.value.scale.set(0.3)
+  model.value.scale.set(BASE_SCALE)
   model.value.x = 150
   model.value.y = 200
   model.value.motion('idle')
@@ -266,6 +275,8 @@ watch(() => props.skinFile, (file) => {
   if (file) changeSkin(file)
 })
 
+// 大小缩放改由容器 CSS transform 处理（见模板 :style 的 transform），这里不再操作 PIXI。
+
 defineExpose({ triggerReminder, triggerPreview })
 
 onMounted(() => {
@@ -289,7 +300,12 @@ onUnmounted(() => {
   <div
     ref="container"
     class="live2d-pet"
-    :style="{ left: positionStyle.x + 'px', top: positionStyle.y + 'px' }"
+    :style="{
+      left: positionStyle.x + 'px',
+      top: positionStyle.y + 'px',
+      transform: 'scale(' + containerScale + ')',
+      transformOrigin: position === 'left' ? 'left bottom' : 'right bottom'
+    }"
     @mousedown="startDrag"
     @touchstart="startDrag"
   >

@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   triggerReminder: (data) => ipcRenderer.send('trigger-reminder', data),
   setPetDisplayMode: (mode) => ipcRenderer.send('set-pet-display-mode', mode),
   setPetSkin: (data) => ipcRenderer.send('set-pet-skin', data),
+  setPetScale: (scale) => ipcRenderer.send('set-pet-scale', scale),
   syncPetState: (data) => ipcRenderer.send('sync-pet-state', data),
   previewReminder: (data) => ipcRenderer.send('preview-reminder', data),
 

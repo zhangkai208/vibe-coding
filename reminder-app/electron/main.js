@@ -259,7 +259,8 @@ ipcMain.handle('get-settings', () => {
       happiness: 50,
       displayMode: 'always',
       position: { x: 50, y: 0 },
-      skins: { left: 'default', right: 'default' }
+      skins: { left: 'default', right: 'default' },
+      petScale: 0.3
     },
     globalPaused: false,
     autoLaunch: false,
@@ -352,6 +353,15 @@ ipcMain.on('set-pet-skin', (_event, data) => {
       type: 'set-skin',
       position: data.position,
       file: data.file
+    })
+  }
+})
+
+ipcMain.on('set-pet-scale', (_event, scale) => {
+  if (petWindow) {
+    petWindow.webContents.send('pet-message', {
+      type: 'set-scale',
+      scale: scale
     })
   }
 })
