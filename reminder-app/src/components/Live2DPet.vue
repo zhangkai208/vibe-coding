@@ -12,6 +12,10 @@ const props = defineProps({
   modelPath: {
     type: String,
     required: true
+  },
+  skinFile: {
+    type: String,
+    default: 'model.default.json'
   }
 })
 
@@ -100,7 +104,40 @@ function waitForRuntime(timeout = 10000) {
   })
 }
 
-// 加载 Live2D 模型
+// Live2DModel 构造器（首次 import 后缓存，供换装复用）
+let Live2DModelCtor = null
+
+// 把已加载的模型挂到舞台并定位
+function applyModel(loadedModel) {
+  model.value = loadedModel
+  pixiApp.value.stage.addChild(model.value)
+  model.value.anchor.set(0.5, 0.5)
+  model.value.scale.set(0.3)
+  model.value.x = 150
+  model.value.y = 200
+  model.value.motion('idle')
+}
+
+// 按服装文件名加载模型：本地优先，CDN 兜底
+async function fetchModel(file) {
+  const modelDir = props.position === 'left' ? '22' : '33'
+  const localUrl = `./models/${modelDir}/${file}`
+  const cdnUrl = `https://cdn.jsdelivr.net/gh/imuncle/live2d/model/${modelDir}/${file}`
+
+  debug('加载模型(本地): ' + file)
+  try {
+    const m = await Live2DModelCtor.from(localUrl)
+    debug('本地模型加载成功')
+    return m
+  } catch (localErr) {
+    debug('本地失败: ' + localErr.message + '，尝试 CDN')
+    const m = await Live2DModelCtor.from(cdnUrl)
+    debug('CDN 模型加载成功')
+    return m
+  }
+}
+
+// 初始加载：创建 PIXI 应用 + 加载当前皮肤模型
 async function loadModel() {
   debug('开始加载...')
 
@@ -111,10 +148,10 @@ async function loadModel() {
 
     // 动态导入 pixi-live2d-display（确保运行时已加载）
     debug('导入 pixi-live2d-display...')
-    const { Live2DModel } = await import('pixi-live2d-display')
+    Live2DModelCtor = (await import('pixi-live2d-display')).Live2DModel
 
     debug('注册 Ticker...')
-    Live2DModel.registerTicker(PIXI.Ticker)
+    Live2DModelCtor.registerTicker(PIXI.Ticker)
 
     debug('创建 PIXI 应用...')
     pixiApp.value = new PIXI.Application({
@@ -127,34 +164,40 @@ async function loadModel() {
     })
     debug('PIXI 就绪，开始加载模型...')
 
-    const modelDir = props.position === 'left' ? '22' : '33'
-    const cdnUrl = `https://cdn.jsdelivr.net/gh/imuncle/live2d/model/${modelDir}/model.default.json`
-
-    debug('加载模型: CDN')
-    let loadedModel
-    try {
-      loadedModel = await Live2DModel.from(cdnUrl)
-      debug('CDN 模型加载成功')
-    } catch (cdnErr) {
-      debug('CDN 失败: ' + cdnErr.message + '，尝试本地')
-      const localUrl = `./models/${modelDir}/model.default.json`
-      loadedModel = await Live2DModel.from(localUrl)
-      debug('本地模型加载成功')
-    }
-
-    model.value = loadedModel
-    pixiApp.value.stage.addChild(model.value)
-    model.value.anchor.set(0.5, 0.5)
-    model.value.scale.set(0.3)
-    model.value.x = 150
-    model.value.y = 200
-    model.value.motion('idle')
+    applyModel(await fetchModel(props.skinFile))
     isLoading.value = false
     debug('模型就绪!')
 
   } catch (error) {
     debug('失败: ' + error.message)
     console.error('[Live2DPet] 完整错误:', error)
+    isLoading.value = false
+  }
+}
+
+// 切换服装（运行时复用同一 PIXI 应用，只替换舞台上的模型）
+async function changeSkin(file) {
+  if (!pixiApp.value || !Live2DModelCtor) return
+  isLoading.value = true
+
+  // 先移除并销毁旧模型，避免叠影 / 内存泄漏
+  if (model.value) {
+    try {
+      pixiApp.value.stage.removeChild(model.value)
+      model.value.destroy()
+    } catch (e) {
+      console.error('[Live2DPet] 销毁旧模型失败:', e)
+    }
+    model.value = null
+  }
+
+  try {
+    applyModel(await fetchModel(file))
+    debug('换装完成: ' + file)
+  } catch (error) {
+    debug('换装失败: ' + error.message)
+    console.error('[Live2DPet] 换装错误:', error)
+  } finally {
     isLoading.value = false
   }
 }
@@ -216,6 +259,11 @@ function onBubbleAutoExpire(reminderId) {
 watch(() => petStore.mood, (newMood) => {
   if (!model.value) return
   if (newMood === 'happy') model.value.motion('thanking')
+})
+
+// 服装变化时重新加载模型
+watch(() => props.skinFile, (file) => {
+  if (file) changeSkin(file)
 })
 
 defineExpose({ triggerReminder, triggerPreview })

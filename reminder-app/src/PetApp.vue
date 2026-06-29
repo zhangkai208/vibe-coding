@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import Live2DPet from '@/components/Live2DPet.vue'
 import { usePetStore } from '@/stores/pet'
 import { useSettingsStore } from '@/stores/settings'
+import { skinToFile } from '@/constants/skins'
 
 const petStore = usePetStore()
 const settingsStore = useSettingsStore()
@@ -11,6 +12,11 @@ const petsVisible = ref(true)
 const isTemporarilyShown = ref(false)
 const leftPetRef = ref(null)
 const rightPetRef = ref(null)
+
+// 设置加载完成后再挂载宠物，确保初始皮肤文件名就绪
+const ready = ref(false)
+const leftSkinFile = ref('model.default.json')
+const rightSkinFile = ref('model.default.json')
 
 // 鼠标穿透控制：当鼠标在宠物/气泡上时允许交互，其他区域穿透
 function handleMouseMove(e) {
@@ -46,6 +52,10 @@ function handleIPCMessage(event, data) {
     petStore.displayMode = data.mode
     petsVisible.value = data.mode === 'always'
     isTemporarilyShown.value = false
+  } else if (data.type === 'set-skin') {
+    // 主窗口切换了某侧宠物的服装，更新 skinFile 触发 Live2DPet 重载
+    if (data.position === 'left') leftSkinFile.value = data.file
+    else if (data.position === 'right') rightSkinFile.value = data.file
   } else if (data.type === 'sync-pet-state') {
     if (data.happiness !== undefined) petStore.happiness = data.happiness
     if (data.mood !== undefined) petStore.mood = data.mood
@@ -75,8 +85,13 @@ onMounted(async () => {
       petStore.happiness = settings.pet.happiness ?? 50
       petStore.displayMode = settings.pet.displayMode ?? 'always'
       petsVisible.value = petStore.displayMode === 'always'
+      // 恢复两侧宠物服装（id -> model.*.json）
+      const skins = settings.pet.skins || {}
+      leftSkinFile.value = skinToFile(skins.left)
+      rightSkinFile.value = skinToFile(skins.right)
     }
   } catch {}
+  ready.value = true
 
   if (window.electronAPI?.onPetMessage) {
     window.electronAPI.onPetMessage(handleIPCMessage)
@@ -94,18 +109,22 @@ onUnmounted(() => {
 <template>
   <div class="pet-window">
     <Live2DPet
+      v-if="ready"
       ref="leftPetRef"
       :class="{ 'pet-hidden': !petsVisible }"
       position="left"
       model-path="model/22"
+      :skin-file="leftSkinFile"
       @bubble-closed="onBubbleClosed"
     />
 
     <Live2DPet
+      v-if="ready"
       ref="rightPetRef"
       :class="{ 'pet-hidden': !petsVisible }"
       position="right"
       model-path="model/33"
+      :skin-file="rightSkinFile"
       @bubble-closed="onBubbleClosed"
     />
   </div>

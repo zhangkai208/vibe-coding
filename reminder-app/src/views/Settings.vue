@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { usePetStore } from '@/stores/pet'
 import { useSettingsStore } from '@/stores/settings'
 import { ArrowLeft } from '@element-plus/icons-vue'
+import { SKINS, skinToFile } from '@/constants/skins'
 
 const router = useRouter()
 const petStore = usePetStore()
@@ -28,6 +29,24 @@ async function handleDisplayModeChange() {
   })
   if (window.electronAPI?.setPetDisplayMode) {
     window.electronAPI.setPetDisplayMode(petStore.displayMode)
+  }
+}
+
+async function handleSkinChange(positionKey) {
+  await settingsStore.saveSettings({
+    pet: {
+      mood: petStore.mood,
+      happiness: petStore.happiness,
+      displayMode: petStore.displayMode,
+      position: petStore.position,
+      skins: { ...petStore.skins }
+    }
+  })
+  if (window.electronAPI?.setPetSkin) {
+    window.electronAPI.setPetSkin({
+      position: positionKey,
+      file: skinToFile(petStore.skins[positionKey])
+    })
   }
 }
 
@@ -103,6 +122,22 @@ function toggleWeekday(val) {
                 <div class="happiness-bar" :style="{ width: happinessPercent + '%' }"></div>
               </div>
               <span class="happiness-value">{{ petStore.happinessDesc }}</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">左侧宠物服装</span>
+            <div class="setting-control">
+              <select class="custom-select" v-model="petStore.skins.left" @change="handleSkinChange('left')">
+                <option v-for="s in SKINS" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">右侧宠物服装</span>
+            <div class="setting-control">
+              <select class="custom-select" v-model="petStore.skins.right" @change="handleSkinChange('right')">
+                <option v-for="s in SKINS" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
             </div>
           </div>
         </div>

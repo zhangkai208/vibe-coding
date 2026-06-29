@@ -258,7 +258,8 @@ ipcMain.handle('get-settings', () => {
       mood: 'normal',
       happiness: 50,
       displayMode: 'always',
-      position: { x: 50, y: 0 }
+      position: { x: 50, y: 0 },
+      skins: { left: 'default', right: 'default' }
     },
     globalPaused: false,
     autoLaunch: false,
@@ -341,6 +342,16 @@ ipcMain.on('set-pet-display-mode', (_event, mode) => {
     petWindow.webContents.send('pet-message', {
       type: 'set-display-mode',
       mode: mode
+    })
+  }
+})
+
+ipcMain.on('set-pet-skin', (_event, data) => {
+  if (petWindow) {
+    petWindow.webContents.send('pet-message', {
+      type: 'set-skin',
+      position: data.position,
+      file: data.file
     })
   }
 })

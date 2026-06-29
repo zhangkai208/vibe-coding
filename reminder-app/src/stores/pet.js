@@ -14,6 +14,9 @@ export const usePetStore = defineStore('pet', () => {
   // 位置
   const position = ref({ x: 50, y: 0 })
 
+  // 服装（左/右宠物各自的皮肤 id，见 constants/skins.js）
+  const skins = ref({ left: 'default', right: 'default' })
+
   // 好感度衰减定时器
   let decayTimer = null
 
@@ -73,6 +76,11 @@ export const usePetStore = defineStore('pet', () => {
     position.value = { x, y }
   }
 
+  // 设置服装（positionKey: 'left' | 'right'）
+  function setSkin(positionKey, id) {
+    skins.value = { ...skins.value, [positionKey]: id }
+  }
+
   // 启动好感度衰减（每小时 -1）
   function startHappinessDecay() {
     stopHappinessDecay()
@@ -97,12 +105,14 @@ export const usePetStore = defineStore('pet', () => {
     happiness,
     displayMode,
     position,
+    skins,
     moodEmoji,
     happinessDesc,
     onResponseReminder,
     onIgnoreReminder,
     setDisplayMode,
     setPosition,
+    setSkin,
     startHappinessDecay,
     stopHappinessDecay
   }

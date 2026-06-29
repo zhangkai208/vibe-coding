@@ -96,6 +96,12 @@ onMounted(async () => {
     if (settings.pet.position) {
       petStore.setPosition(settings.pet.position.x, settings.pet.position.y)
     }
+    if (settings.pet.skins) {
+      petStore.skins = {
+        left: settings.pet.skins.left ?? 'default',
+        right: settings.pet.skins.right ?? 'default'
+      }
+    }
     petStore.updateMood?.()
   }
 
