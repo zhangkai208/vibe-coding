@@ -44,9 +44,9 @@ export const usePetStore = defineStore('pet', () => {
     return '很不高兴！'
   })
 
-  // 用户响应提醒（开心）
+  // 用户响应提醒（开心）：重置到高位，确保下一轮从 happy 稳定衰减到底、走完四种情绪
   function onResponseReminder() {
-    happiness.value = Math.min(100, happiness.value + 10)
+    happiness.value = 95
     updateMood()
   }
 
@@ -56,13 +56,13 @@ export const usePetStore = defineStore('pet', () => {
     updateMood()
   }
 
-  // 更新心情
+  // 更新心情（阈值四等分：每档 25，确保四种情绪都能被经历到）
   function updateMood() {
-    if (happiness.value >= 70) {
+    if (happiness.value >= 75) {
       mood.value = 'happy'
-    } else if (happiness.value >= 40) {
+    } else if (happiness.value >= 50) {
       mood.value = 'normal'
-    } else if (happiness.value >= 20) {
+    } else if (happiness.value >= 25) {
       mood.value = 'sad'
     } else {
       mood.value = 'angry'
@@ -89,15 +89,16 @@ export const usePetStore = defineStore('pet', () => {
     petScale.value = s
   }
 
-  // 启动好感度衰减（每小时 -1）
+  // 启动好感度衰减（每 20 秒 -1，≈每分钟 -3）：配合 30~45 分钟确认节奏，
+  // 让数值在一个周期内从高位扫到 0，轮换经历四种情绪
   function startHappinessDecay() {
     stopHappinessDecay()
     decayTimer = setInterval(() => {
       if (happiness.value > 0) {
-        happiness.value = Math.max(0, happiness.value - 1)
+        happiness.value = Math.max(0, happiness.value - 1) // 最低扣到 0，不低于
         updateMood()
       }
-    }, 60 * 60 * 1000) // 每小时 -1
+    }, 20 * 1000) // 每 20 秒 -1
   }
 
   // 停止好感度衰减
