@@ -19,6 +19,11 @@ export const useReminderStore = defineStore('reminder', () => {
   // 调度器定时器 ID
   let schedulerId = null
 
+  // 响应式时钟（每秒更新一次）：让"下次提醒"倒计时能实时走秒。
+  // Date.now() 不是响应式的，直接用它的 computed 只会在提醒列表变化时才重算
+  const nowMs = ref(Date.now())
+  let clockId = null
+
   // 已发送预告的提醒 ID 集合
   const previewSent = new Set()
 
@@ -26,7 +31,7 @@ export const useReminderStore = defineStore('reminder', () => {
 
   // 下一个即将触发的提醒
   const nextReminder = computed(() => {
-    const now = Date.now()
+    const now = nowMs.value
     let nearest = null
     let nearestTime = Infinity
 
@@ -42,15 +47,14 @@ export const useReminderStore = defineStore('reminder', () => {
     return nearest
   })
 
-  // 距离下一次提醒的分钟数
-  const minutesUntilNext = computed(() => {
+  // 距离下一次提醒的毫秒数（随 nowMs 每秒刷新，界面可倒计时到秒）
+  const msUntilNext = computed(() => {
     const r = nextReminder.value
     if (!r) return Infinity
 
-    const now = Date.now()
     const last = r.lastTriggered ? new Date(r.lastTriggered).getTime() : 0
-    const remaining = r.interval * 60 * 1000 - (now - last)
-    return Math.max(0, Math.ceil(remaining / 60000))
+    const remaining = r.interval * 60 * 1000 - (nowMs.value - last)
+    return Math.max(0, remaining)
   })
 
   // ===== 提醒 CRUD =====
@@ -94,6 +98,7 @@ export const useReminderStore = defineStore('reminder', () => {
   function startScheduler() {
     stopScheduler()
     schedulerId = setInterval(schedulerTick, TICK_INTERVAL)
+    clockId = setInterval(() => { nowMs.value = Date.now() }, 1000)
     // 启动时立即执行一次 Tick
     schedulerTick()
   }
@@ -103,6 +108,10 @@ export const useReminderStore = defineStore('reminder', () => {
     if (schedulerId) {
       clearInterval(schedulerId)
       schedulerId = null
+    }
+    if (clockId) {
+      clearInterval(clockId)
+      clockId = null
     }
   }
 
@@ -218,7 +227,7 @@ export const useReminderStore = defineStore('reminder', () => {
     globalPaused,
     isIdle,
     nextReminder,
-    minutesUntilNext,
+    msUntilNext,
     addReminder,
     updateReminder,
     removeReminder,

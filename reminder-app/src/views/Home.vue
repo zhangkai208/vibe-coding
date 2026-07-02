@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useReminderStore } from '@/stores/reminder'
 import { usePetStore } from '@/stores/pet'
@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/stores/settings'
 import ReminderCard from '@/components/ReminderCard.vue'
 import AddReminder from '@/components/AddReminder.vue'
 import { PRESET_REMINDERS } from '@/constants/presets'
+import { formatCountdown } from '@/utils/time'
 import {
   Setting, Plus, VideoPause, VideoPlay,
   Coffee, Sunny, Timer, Aim,
@@ -20,6 +21,14 @@ const settingsStore = useSettingsStore()
 
 const showAddDialog = ref(false)
 const editingReminder = ref(null)
+
+// 下次提醒实时倒计时文案（msUntilNext 随 store 的秒级时钟自动刷新）
+const countdownText = computed(() => {
+  const ms = reminderStore.msUntilNext
+  if (ms === Infinity) return ''
+  if (ms <= 0) return '即将提醒'
+  return formatCountdown(ms) + '后'
+})
 
 // 预设图标映射
 const presetIcons = [Coffee, Sunny, Aim, WindPower, Monitor, Timer]
@@ -107,7 +116,7 @@ async function saveReminders() {
     <div v-if="!reminderStore.globalPaused && reminderStore.nextReminder" class="next-bar">
       <div class="next-dot"></div>
       <span class="next-content">{{ reminderStore.nextReminder.content }}</span>
-      <span class="next-time">{{ reminderStore.minutesUntilNext }} 分钟后</span>
+      <span class="next-time">{{ countdownText }}</span>
     </div>
 
     <!-- 提醒列表（可滚动区域） -->

@@ -1,9 +1,10 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePetStore } from '@/stores/pet'
 import { useSettingsStore } from '@/stores/settings'
 import { ArrowLeft } from '@element-plus/icons-vue'
+import { IconMoodSmile, IconMoodNeutral, IconMoodSad, IconMoodAngry } from '@tabler/icons-vue'
 import { SKINS, skinToFile } from '@/constants/skins'
 
 const router = useRouter()
@@ -16,6 +17,31 @@ const progressColor = computed(() => {
   if (h >= 70) return '#67c23a'
   if (h >= 40) return 'var(--primary)'
   return '#f56c6c'
+})
+
+// 好感度测试滑块：四档固定对应四种心情区间（阈值 75/50/25）的中值。
+// 拖动 → 写 happiness + 立即重算 mood；写盘与向宠物窗口同步由 App.vue 的
+// happiness/mood watch 自动完成（跳变 |Δ|>1 会立即落盘）
+const MOOD_LEVELS = [12, 37, 62, 88] // 1=生气 2=难过 3=平静 4=开心
+// 心情刻度：用 Tabler 表情图标替代 emoji，每档配对应情绪色，拖动时直观区分四档
+const moodMarks = {
+  1: { style: { color: '#f56c6c' }, label: h(IconMoodAngry, { size: 22 }) },
+  2: { style: { color: '#7BB3E0' }, label: h(IconMoodSad, { size: 22 }) },
+  3: { style: { color: '#9B8BB8' }, label: h(IconMoodNeutral, { size: 22 }) },
+  4: { style: { color: '#FFB347' }, label: h(IconMoodSmile, { size: 22 }) }
+}
+const moodLevel = computed({
+  get() {
+    const h = petStore.happiness
+    if (h >= 75) return 4
+    if (h >= 50) return 3
+    if (h >= 25) return 2
+    return 1
+  },
+  set(level) {
+    petStore.happiness = MOOD_LEVELS[level - 1]
+    petStore.updateMood()
+  }
 })
 
 async function handleDisplayModeChange() {
@@ -111,8 +137,6 @@ function toggleWeekday(val) {
       <button class="back-btn" @click="router.push('/')">
         <el-icon><ArrowLeft /></el-icon>
       </button>
-      <h1 class="page-title">设置</h1>
-      <div style="width: 36px;"></div>
     </div>
 
     <div class="settings-list">
@@ -139,6 +163,17 @@ function toggleWeekday(val) {
               </div>
               <span class="happiness-value">{{ petStore.happinessDesc }}</span>
             </div>
+          </div>
+          <div class="setting-row column mood-slider-row">
+            <span class="setting-label">心情调节</span>
+            <el-slider
+              v-model="moodLevel"
+              :min="1"
+              :max="4"
+              :step="1"
+              :marks="moodMarks"
+              :show-tooltip="false"
+            />
           </div>
           <div class="setting-row">
             <span class="setting-label">左侧宠物服装</span>
@@ -310,13 +345,6 @@ function toggleWeekday(val) {
   transform: scale(1.08);
 }
 
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: white;
-  text-shadow: 0 2px 8px rgba(196, 176, 212, 0.3);
-}
-
 .settings-list {
   position: relative;
   z-index: 1;
@@ -425,6 +453,16 @@ function toggleWeekday(val) {
   white-space: nowrap;
   min-width: 60px;
   text-align: right;
+}
+
+/* 心情测试滑块：给表情刻度留出下方空间 */
+.mood-slider-row {
+  padding-bottom: 22px;
+}
+.mood-slider-row :deep(.el-slider) {
+  width: 100%;
+  padding: 0 8px;
+  box-sizing: border-box;
 }
 
 /* 星期选择 */

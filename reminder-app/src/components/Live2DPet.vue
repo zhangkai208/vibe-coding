@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import * as PIXI from 'pixi.js'
 import SpeechBubble from './SpeechBubble.vue'
 import { usePetStore } from '@/stores/pet'
+import { createMoodOverlay } from '@/utils/moodOverlay'
 
 const props = defineProps({
   position: {
@@ -35,6 +36,8 @@ const container = ref(null)
 const canvas = ref(null)
 const pixiApp = ref(null)
 const model = ref(null)
+// 心情参数叠加控制器（非响应式，跟随模型生命周期）
+let moodOverlay = null
 
 // 气泡状态
 const isSpeaking = ref(false)
@@ -125,6 +128,13 @@ function applyModel(loadedModel) {
   model.value.x = 150
   model.value.y = 200
   model.value.motion('idle')
+
+  // 挂载心情叠加层（换装会重建模型，这里统一销毁重建）
+  moodOverlay?.destroy()
+  moodOverlay = createMoodOverlay(loadedModel, {
+    awaySign: props.position === 'left' ? -1 : 1
+  })
+  moodOverlay.setMood(petStore.mood, { instant: true })
 }
 
 // 按服装文件名加载模型：本地优先，CDN 兜底
@@ -266,9 +276,22 @@ function onBubbleAutoExpire(reminderId) {
 }
 
 watch(() => petStore.mood, (newMood) => {
+  moodOverlay?.setMood(newMood)
   if (!model.value) return
   if (newMood === 'happy') model.value.motion('thanking')
 })
+
+// 视线跟随：把屏幕坐标换算到画布内部坐标系（300x400）后交给 focus()。
+// getBoundingClientRect 已含容器 CSS 缩放，比例换算天然抵消。生气时故意躲开鼠标。
+function lookAt(clientX, clientY) {
+  if (!model.value || !canvas.value) return
+  const rect = canvas.value.getBoundingClientRect()
+  if (!rect.width) return
+  let x = (clientX - rect.left) * (300 / rect.width)
+  const y = (clientY - rect.top) * (400 / rect.height)
+  if (petStore.mood === 'angry') x = 300 - x
+  model.value.focus(x, y)
+}
 
 // 服装变化时重新加载模型
 watch(() => props.skinFile, (file) => {
@@ -277,7 +300,7 @@ watch(() => props.skinFile, (file) => {
 
 // 大小缩放改由容器 CSS transform 处理（见模板 :style 的 transform），这里不再操作 PIXI。
 
-defineExpose({ triggerReminder, triggerPreview })
+defineExpose({ triggerReminder, triggerPreview, lookAt })
 
 onMounted(() => {
   loadModel()
@@ -292,6 +315,7 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', endDrag)
   window.removeEventListener('touchmove', onDrag)
   window.removeEventListener('touchend', endDrag)
+  moodOverlay?.destroy()
   if (pixiApp.value) pixiApp.value.destroy(true)
 })
 </script>

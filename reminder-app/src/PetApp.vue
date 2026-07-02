@@ -23,6 +23,12 @@ const petScale = ref(0.3)
 // mousemove 每秒可触发上百次，缓存上次状态，只在进入/离开宠物区域的翻转瞬间才发 IPC
 let lastInteractable = null
 function handleMouseMove(e) {
+  // 视线跟随：每次移动都喂坐标（focus 内部自带平滑；生气时的躲闪在 lookAt 里处理）
+  if (petsVisible.value) {
+    leftPetRef.value?.lookAt(e.clientX, e.clientY)
+    rightPetRef.value?.lookAt(e.clientX, e.clientY)
+  }
+
   const el = document.elementFromPoint(e.clientX, e.clientY)
   if (!el) return
 
@@ -91,6 +97,7 @@ onMounted(async () => {
     const settings = await settingsStore.loadSettings()
     if (settings?.pet) {
       petStore.happiness = settings.pet.happiness ?? 50
+      petStore.updateMood()  // 启动即按存盘的好感度算出心情，叠加层第一帧就是对的脸色
       petStore.displayMode = settings.pet.displayMode ?? 'always'
       petsVisible.value = petStore.displayMode === 'always'
       // 恢复两侧宠物服装（id -> model.*.json）
