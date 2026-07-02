@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setPetScale: (scale) => ipcRenderer.send('set-pet-scale', scale),
   syncPetState: (data) => ipcRenderer.send('sync-pet-state', data),
   previewReminder: (data) => ipcRenderer.send('preview-reminder', data),
+  triggerGreeting: (data) => ipcRenderer.send('trigger-greeting', data),
 
   // ===== 宠物窗口 -> 主窗口（通过主进程中转）=====
   acknowledgeReminder: (reminderId) => ipcRenderer.send('reminder-acknowledged', reminderId),

@@ -60,6 +60,19 @@ function handleIPCMessage(event, data) {
     // 另一个宠物也做动作（不说话）
     if (otherPet) otherPet.triggerPreview()
 
+  } else if (data.type === 'greeting') {
+    // 时段问候：复用提醒的出场逻辑（仅提醒时模式下临时现身），气泡是纯消息
+    if (petStore.displayMode === 'reminder-only' && !petsVisible.value) {
+      petsVisible.value = true
+      isTemporarilyShown.value = true
+    }
+
+    const speakingPet = data.position === 'right' ? rightPetRef.value : leftPetRef.value
+    const otherPet = data.position === 'right' ? leftPetRef.value : rightPetRef.value
+
+    if (speakingPet) speakingPet.triggerGreeting(data.content)
+    if (otherPet) otherPet.triggerPreview()
+
   } else if (data.type === 'set-display-mode') {
     petStore.displayMode = data.mode
     petsVisible.value = data.mode === 'always'
@@ -134,6 +147,7 @@ onUnmounted(() => {
       model-path="model/22"
       :skin-file="leftSkinFile"
       :pet-scale="petScale"
+      :visible="petsVisible"
       @bubble-closed="onBubbleClosed"
     />
 
@@ -145,6 +159,7 @@ onUnmounted(() => {
       model-path="model/33"
       :skin-file="rightSkinFile"
       :pet-scale="petScale"
+      :visible="petsVisible"
       @bubble-closed="onBubbleClosed"
     />
   </div>

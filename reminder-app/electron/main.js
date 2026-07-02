@@ -12,6 +12,21 @@ const iconPath = path.join(__dirname, isDev ? '../public/icon.png' : '../dist/ic
 // 开机自启时由 setLoginItemSettings 的 args 注入 --hidden，据此静默启动（不弹出主窗口）
 const startHidden = process.argv.includes('--hidden')
 
+// 单实例锁：防止应用被重复打开（否则两层宠物叠在一起、每条提醒响两遍、两套存储互相覆盖）。
+// 抢不到锁说明已有实例在运行，立即退出；唤起主窗口的事交给已有实例（见下面 second-instance）
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0)
+}
+
+// 已在运行时又被启动了一次（比如托盘里挂着，用户又去双击了图标）：把主窗口唤到前台
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
 // 主窗口
 let mainWindow = null
 // 宠物窗口
@@ -33,7 +48,11 @@ function createMainWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // 提醒调度器与好感度衰减跑在本窗口的渲染进程里；窗口收进托盘后
+      // Chromium 会把隐藏页面的定时器节流到约每分钟一次，导致提醒迟到、
+      // 预告丢失、心情衰减变慢，这里必须关掉节流
+      backgroundThrottling: false
     }
   })
 
@@ -46,13 +65,23 @@ function createMainWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
-  // 关闭时最小化到托盘（除非正在退出）
+  // 关闭时最小化到托盘；关掉了"关闭到托盘"则整个退出——
+  // 提醒调度器跑在主窗口渲染进程里，若只关主窗口留着宠物窗口，
+  // 宠物会变成"看着还在、永远不再提醒"的半死状态
   mainWindow.on('close', (event) => {
+    if (isQuitting) return
     const settings = store.get('settings', {})
-    if (!isQuitting && settings.closeToTray !== false) {
+    if (settings.closeToTray !== false) {
       event.preventDefault()
       mainWindow.hide()
+    } else {
+      isQuitting = true
+      app.quit()
     }
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
   })
 
   mainWindow.on('ready-to-show', () => {
@@ -385,6 +414,17 @@ ipcMain.on('preview-reminder', (_event, data) => {
   }
 })
 
+// 时段问候（工作时段起/止）：转发到宠物窗口，展示为纯消息气泡
+ipcMain.on('trigger-greeting', (_event, data) => {
+  if (petWindow) {
+    petWindow.webContents.send('pet-message', {
+      type: 'greeting',
+      content: data.content,
+      position: data.position
+    })
+  }
+})
+
 // ===== 宠物窗口 -> 主窗口（用户响应）=====
 
 ipcMain.on('reminder-acknowledged', (_event, reminderId) => {
@@ -400,8 +440,7 @@ ipcMain.on('reminder-postponed', (_event, data) => {
   if (mainWindow) {
     mainWindow.webContents.send('reminder-response', {
       type: 'postponed',
-      reminderId: data.reminderId,
-      delay: data.delay
+      reminderId: data.reminderId
     })
   }
 })

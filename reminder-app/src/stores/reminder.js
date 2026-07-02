@@ -1,10 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useSettingsStore } from './settings'
-import { isWithinWorkingHours } from '@/utils/time'
+import { isWithinWorkingHours, matchWorkBoundary } from '@/utils/time'
 
 // 调度器 Tick 间隔（毫秒）
 const TICK_INTERVAL = 10 * 1000 // 10 秒，兼顾精度和性能
+
+// 错过宽限（毫秒）：正常运行下到点后 1 个 tick 内就会触发；超过宽限还没触发，
+// 说明这段时间在关机/休眠，或被暂停/空闲/工作时段跳过，属于积压的过期提醒——
+// 静默重新计时而不补触发，避免开机/唤醒瞬间多个提醒同时弹出、气泡互相覆盖
+const MISSED_GRACE_MS = 60 * 1000
 
 export const useReminderStore = defineStore('reminder', () => {
   // 提醒列表
@@ -26,6 +31,10 @@ export const useReminderStore = defineStore('reminder', () => {
 
   // 已发送预告的提醒 ID 集合
   const previewSent = new Set()
+
+  // 时段问候：记录起点/终点各自最后一次问候的日期，保证每天各只发一次。
+  // 不持久化——重启后想重发得恰好落在起止的那一分钟内，概率可忽略
+  const greetingSentOn = { start: '', end: '' }
 
   // ===== 计算属性 =====
 
@@ -69,7 +78,8 @@ export const useReminderStore = defineStore('reminder', () => {
       autoCloseDelay: reminder.autoCloseDelay || 30,
       enabled: reminder.enabled ?? true,
       position: reminder.position || 'left',
-      lastTriggered: null
+      // 周期从添加那一刻起算："每30分钟"= 添加后 30 分钟第一次提醒
+      lastTriggered: new Date().toISOString()
     }
     reminders.value.push(newReminder)
     return newReminder
@@ -126,6 +136,9 @@ export const useReminderStore = defineStore('reminder', () => {
       !isWithinWorkingHours(settingsStore.workingHours)
     ) return
 
+    // 时段问候（起止分钟按 isWithinWorkingHours 的闭区间算，都在时段内，能走到这里）
+    checkWorkGreeting(settingsStore.workingHours)
+
     const now = Date.now()
 
     for (let i = 0; i < reminders.value.length; i++) {
@@ -135,6 +148,16 @@ export const useReminderStore = defineStore('reminder', () => {
       const last = reminder.lastTriggered ? new Date(reminder.lastTriggered).getTime() : 0
       const elapsed = now - last
       const targetMs = reminder.interval * 60 * 1000
+
+      // 积压的过期提醒（关机/休眠/暂停期间错过的）：静默重新计时，不补触发
+      if (elapsed >= targetMs + MISSED_GRACE_MS) {
+        reminders.value[i] = {
+          ...reminder,
+          lastTriggered: new Date().toISOString()
+        }
+        previewSent.delete(reminder.id)
+        continue
+      }
 
       // 预告：触发前 10 秒
       if (elapsed >= targetMs - 10000 && elapsed < targetMs && !previewSent.has(reminder.id)) {
@@ -152,6 +175,29 @@ export const useReminderStore = defineStore('reminder', () => {
         }
         previewSent.delete(reminder.id)
       }
+    }
+  }
+
+  // ===== 时段问候 =====
+
+  // 上/下班问候文案与播报宠物（开工左侧 22、下班右侧 33，各自固定）
+  const WORK_GREETINGS = {
+    start: { content: '工作时间到啦，今天也一起加油吧！', position: 'left' },
+    end: { content: '下班时间到啦，今天辛苦了，好好休息～', position: 'right' }
+  }
+
+  // 到达工作时段起点/终点的那一分钟，让宠物说一句问候。
+  // 纯消息气泡：无按钮、自动消失、不影响好感度（见 Live2DPet 的 triggerGreeting）
+  function checkWorkGreeting(workingHours) {
+    const boundary = matchWorkBoundary(workingHours)
+    if (!boundary) return
+
+    const today = new Date().toDateString()
+    if (greetingSentOn[boundary] === today) return
+    greetingSentOn[boundary] = today
+
+    if (window.electronAPI?.triggerGreeting) {
+      window.electronAPI.triggerGreeting(WORK_GREETINGS[boundary])
     }
   }
 

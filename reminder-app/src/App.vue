@@ -48,8 +48,8 @@ function handleReminderResponse(event, data) {
   } else if (data.type === 'ignored') {
     petStore.onIgnoreReminder()
   } else if (data.type === 'postponed') {
-    // 推迟提醒
-    const delayMinutes = data.delay || 5
+    // 推迟时长以设置页的"推迟时长"为准（设置在主窗口编辑，这里读到的永远是最新值）
+    const delayMinutes = settingsStore.reminderDefaults.postponeMinutes || 5
     reminderStore.postponeReminder(data.reminderId, delayMinutes)
   }
 }

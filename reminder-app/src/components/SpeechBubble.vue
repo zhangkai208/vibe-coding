@@ -17,6 +17,11 @@ const props = defineProps({
   autoCloseDelay: {
     type: Number,
     default: 30
+  },
+  // 是否显示"知道了/稍后"操作按钮；时段问候等纯消息气泡传 false
+  showActions: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -122,7 +127,7 @@ onUnmounted(() => { cleanup() })
     </div>
 
     <!-- 操作 -->
-    <div v-if="!isTyping" class="bubble-actions">
+    <div v-if="!isTyping && showActions" class="bubble-actions">
       <button class="btn-ok" @click="handleAcknowledge">
         知道了
       </button>

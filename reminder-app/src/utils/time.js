@@ -21,6 +21,28 @@ export function isWithinWorkingHours(workingHours) {
   return currentMinutes >= startMinutes && currentMinutes <= endMinutes
 }
 
+// 当前时刻是否恰好落在工作时段的起点/终点那一分钟（且当天是选定工作日）。
+// 命中返回 'start' | 'end'，否则 null。调度器 10 秒一跳，同一分钟会命中多次，
+// "每天只发一次"的去重由调用方负责
+export function matchWorkBoundary(workingHours) {
+  if (!workingHours || !workingHours.enabled) return null
+
+  const now = new Date()
+  const day = now.getDay()
+  const weekday = day === 0 ? 7 : day
+  if (!workingHours.weekdays || !workingHours.weekdays.includes(weekday)) return null
+
+  const toMinutes = (str, fallback) => {
+    const [h, m] = (str || fallback).split(':').map(Number)
+    return h * 60 + m
+  }
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+
+  if (currentMinutes === toMinutes(workingHours.start, '09:00')) return 'start'
+  if (currentMinutes === toMinutes(workingHours.end, '18:00')) return 'end'
+  return null
+}
+
 // 格式化分钟为可读文本
 export function formatInterval(minutes) {
   if (minutes < 60) {

@@ -21,6 +21,11 @@ const props = defineProps({
   petScale: {
     type: Number,
     default: 0.3
+  },
+  // 宠物当前是否可见（「仅提醒时出现」模式会隐身）；隐身时停掉渲染省资源
+  visible: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -45,6 +50,8 @@ const speechContent = ref('')
 const speechReminderId = ref('')
 const speechAutoClose = ref(true)
 const speechAutoCloseDelay = ref(30)
+// 问候模式：气泡不带操作按钮，自动消失也不回传"忽略"（不影响好感度）
+const isGreeting = ref(false)
 
 const isLoading = ref(true)
 const debugMsg = ref('初始化...')
@@ -135,6 +142,9 @@ function applyModel(loadedModel) {
     awaySign: props.position === 'left' ? -1 : 1
   })
   moodOverlay.setMood(petStore.mood, { instant: true })
+
+  // 挂载时如果正处于隐身状态（仅提醒时模式），立即停渲染
+  if (!props.visible) setRendering(false)
 }
 
 // 按服装文件名加载模型：本地优先，CDN 兜底
@@ -221,20 +231,72 @@ async function changeSkin(file) {
   }
 }
 
+// ===== 说话队列 =====
+// 同一只宠物话没说完又来新内容时排队，说完一条停顿片刻再说下一条——不覆盖、不丢失。
+// 停顿同时保证气泡组件先卸载再重建，打字机和倒计时能重新播放
+const speechQueue = []
+let nextSpeechTimer = null
+const SPEECH_GAP_MS = 450
+
 // 触发提醒
 function triggerReminder(data) {
-  const content = data.content || data
-  const reminderId = data.reminderId || ''
+  enqueueSpeech({ kind: 'reminder', data: typeof data === 'string' ? { content: data } : data })
+}
 
+// 时段问候（上/下班）：纯消息气泡，15 秒自动消失
+function triggerGreeting(content) {
+  enqueueSpeech({ kind: 'greeting', content })
+}
+
+function enqueueSpeech(item) {
+  if (isSpeaking.value || nextSpeechTimer) {
+    // 同一条提醒已在排队就不重复排（比如手动关闭的气泡一直开着，提醒又到点了）
+    if (
+      item.kind === 'reminder' &&
+      item.data.reminderId &&
+      speechQueue.some(q => q.kind === 'reminder' && q.data.reminderId === item.data.reminderId)
+    ) return
+    speechQueue.push(item)
+    return
+  }
+  showSpeech(item)
+}
+
+function showSpeech(item) {
+  if (item.kind === 'greeting') {
+    isGreeting.value = true
+    speechContent.value = item.content
+    speechReminderId.value = ''
+    speechAutoClose.value = true
+    speechAutoCloseDelay.value = 15
+  } else {
+    const data = item.data
+    isGreeting.value = false
+    speechContent.value = data.content || ''
+    speechReminderId.value = data.reminderId || ''
+    speechAutoClose.value = data.autoClose !== false
+    speechAutoCloseDelay.value = data.autoCloseDelay || 30
+  }
   isSpeaking.value = true
-  speechContent.value = content
-  speechReminderId.value = reminderId
-  speechAutoClose.value = data.autoClose !== false
-  speechAutoCloseDelay.value = data.autoCloseDelay || 30
 
   if (model.value) {
     model.value.motion('tap_body')
   }
+}
+
+// 气泡关闭后的公共收尾：队列里还有话就接着说；全说完了才通知父组件
+// （「仅提醒时」模式靠这个通知谢幕隐身，排队期间不能提前发）
+function finishSpeech() {
+  isSpeaking.value = false
+  const next = speechQueue.shift()
+  if (next) {
+    nextSpeechTimer = setTimeout(() => {
+      nextSpeechTimer = null
+      showSpeech(next)
+    }, SPEECH_GAP_MS)
+    return
+  }
+  emit('bubble-closed')
 }
 
 // 预告动作
@@ -244,35 +306,33 @@ function triggerPreview() {
   }
 }
 
-// 气泡事件 —— 关闭后通知父组件，用于「仅提醒时」模式下隐藏宠物
+// 气泡事件 —— 统一走 finishSpeech 收尾（排队/谢幕逻辑见上）
 function onBubbleClose() {
-  isSpeaking.value = false
-  emit('bubble-closed')
+  finishSpeech()
 }
 
 function onBubbleAcknowledge(reminderId) {
   if (window.electronAPI?.acknowledgeReminder) {
     window.electronAPI.acknowledgeReminder(reminderId)
   }
-  isSpeaking.value = false
   if (model.value) model.value.motion('thanking')
-  emit('bubble-closed')
+  finishSpeech()
 }
 
 function onBubblePostpone(reminderId) {
+  // 推迟时长由主窗口按设置里的"推迟时长"决定，这里只上报"用户点了稍后"
   if (window.electronAPI?.postponeReminder) {
-    window.electronAPI.postponeReminder({ reminderId, delay: 5 })
+    window.electronAPI.postponeReminder({ reminderId })
   }
-  isSpeaking.value = false
-  emit('bubble-closed')
+  finishSpeech()
 }
 
 function onBubbleAutoExpire(reminderId) {
-  if (window.electronAPI?.ignoreReminder) {
+  // 问候气泡到点消失是正常谢幕，不算"忽略提醒"，不回传、不扣好感
+  if (!isGreeting.value && window.electronAPI?.ignoreReminder) {
     window.electronAPI.ignoreReminder(reminderId)
   }
-  isSpeaking.value = false
-  emit('bubble-closed')
+  finishSpeech()
 }
 
 watch(() => petStore.mood, (newMood) => {
@@ -293,6 +353,20 @@ function lookAt(clientX, clientY) {
   model.value.focus(x, y)
 }
 
+// ===== 隐身省资源 =====
+// 「仅提醒时出现」模式下宠物用 CSS 隐身，但 PIXI 还在每秒 60 帧地画看不见的画面。
+// 隐身时把渲染循环和模型更新（呼吸/眨眼/物理）一起停掉，现身时恢复
+function setRendering(on) {
+  if (pixiApp.value) {
+    on ? pixiApp.value.start() : pixiApp.value.stop()
+  }
+  if (model.value) {
+    model.value.autoUpdate = on
+  }
+}
+
+watch(() => props.visible, (v) => setRendering(v))
+
 // 服装变化时重新加载模型
 watch(() => props.skinFile, (file) => {
   if (file) changeSkin(file)
@@ -300,7 +374,7 @@ watch(() => props.skinFile, (file) => {
 
 // 大小缩放改由容器 CSS transform 处理（见模板 :style 的 transform），这里不再操作 PIXI。
 
-defineExpose({ triggerReminder, triggerPreview, lookAt })
+defineExpose({ triggerReminder, triggerGreeting, triggerPreview, lookAt })
 
 onMounted(() => {
   loadModel()
@@ -315,6 +389,10 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', endDrag)
   window.removeEventListener('touchmove', onDrag)
   window.removeEventListener('touchend', endDrag)
+  if (nextSpeechTimer) {
+    clearTimeout(nextSpeechTimer)
+    nextSpeechTimer = null
+  }
   moodOverlay?.destroy()
   if (pixiApp.value) pixiApp.value.destroy(true)
 })
@@ -341,6 +419,7 @@ onUnmounted(() => {
       :reminder-id="speechReminderId"
       :auto-close="speechAutoClose"
       :auto-close-delay="speechAutoCloseDelay"
+      :show-actions="!isGreeting"
       @close="onBubbleClose"
       @acknowledge="onBubbleAcknowledge"
       @postpone="onBubblePostpone"
