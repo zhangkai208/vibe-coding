@@ -19,7 +19,9 @@ const leftSkinFile = ref('model.default.json')
 const rightSkinFile = ref('model.default.json')
 const petScale = ref(0.3)
 
-// 鼠标穿透控制：当鼠标在宠物/气泡上时允许交互，其他区域穿透
+// 鼠标穿透控制：当鼠标在宠物/气泡上时允许交互，其他区域穿透。
+// mousemove 每秒可触发上百次，缓存上次状态，只在进入/离开宠物区域的翻转瞬间才发 IPC
+let lastInteractable = null
 function handleMouseMove(e) {
   const el = document.elementFromPoint(e.clientX, e.clientY)
   if (!el) return
@@ -27,6 +29,9 @@ function handleMouseMove(e) {
   // 检查鼠标是否在交互元素上（宠物容器、气泡、按钮等）
   const interactive = el.closest('.live2d-pet, .speech-bubble, .pet-window')
   const isOnPet = !!interactive && !interactive.classList.contains('pet-window')
+
+  if (isOnPet === lastInteractable) return
+  lastInteractable = isOnPet
 
   if (window.electronAPI?.setPetInteractable) {
     window.electronAPI.setPetInteractable(isOnPet)

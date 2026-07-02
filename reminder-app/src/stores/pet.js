@@ -120,6 +120,7 @@ export const usePetStore = defineStore('pet', () => {
     happinessDesc,
     onResponseReminder,
     onIgnoreReminder,
+    updateMood,
     setDisplayMode,
     setPosition,
     setSkin,

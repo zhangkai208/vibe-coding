@@ -154,10 +154,16 @@ watch(() => petStore.displayMode, (newMode) => {
   saveAllState()
 })
 
-// 监听好感度变化
-watch(() => petStore.happiness, () => {
-  syncPetStateToWindow()
-  saveAllState()
+// 监听好感度变化：自然衰减每 20 秒 -1，逐次落盘没有意义，节流到 5 分钟一次；
+// 确认/忽略造成的跳变（|Δ|>1）仍立即落盘。宠物窗口只消费 mood，同步交给下面的 mood watch
+const HAPPINESS_SAVE_INTERVAL = 5 * 60 * 1000
+let lastHappinessSave = 0
+watch(() => petStore.happiness, (newVal, oldVal) => {
+  const now = Date.now()
+  if (Math.abs(newVal - oldVal) > 1 || now - lastHappinessSave >= HAPPINESS_SAVE_INTERVAL) {
+    lastHappinessSave = now
+    saveAllState()
+  }
 })
 
 // 监听心情变化

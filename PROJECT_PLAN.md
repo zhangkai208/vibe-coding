@@ -89,7 +89,7 @@ model/
 
 ### 加载方式
 
-**本地优先、CDN 兜底**：模型资源已下载到 `public/models/{22,33}/`，运行时优先从本地加载（离线可用、更快），本地失败再回退 CDN。服装切换通过加载不同的 `model.*.json`（共用同一 `.moc`、只换 `closet.*` 服装贴图）实现。
+**本地优先、CDN 兜底**：模型资源已下载到 `public/models/{22,33}/`，运行时优先从本地加载（离线可用、更快），本地失败再回退 CDN。服装切换通过加载不同的 `model.*.json`（共用同一 `.moc`、只换 `closet.*` 服装贴图）实现。Live2D 运行时脚本（`live2d.min.js`、`live2dcubismcore.min.js`）同样本地化到 `public/lib/`，HTML 中通过 `onerror` 回退 CDN，保证断网冷启动也能加载。
 
 ```javascript
 const modelDir = position === 'left' ? '22' : '33'
