@@ -105,9 +105,13 @@ function onBubbleClosed() {
   }
 }
 
-// 拖动结束：把该侧落点写进设置（pet.positions 按侧深合并，另一侧不受影响）
+// 拖动结束：把该侧落点直接写进设置（主进程 deepMerge 只动 pet.positions 这一侧）。
+// 注意不能走 settingsStore.saveSettings——那个包装器会把本窗口启动时加载的
+// 开机自启/工作时段/空闲阈值等旧值一并写回，覆盖用户后来在主窗口改的新设置
 function savePetPosition(side, pos) {
-  settingsStore.saveSettings({ pet: { positions: { [side]: pos } } })
+  if (window.electronAPI?.saveSettings) {
+    window.electronAPI.saveSettings({ pet: { positions: { [side]: pos } } })
+  }
 }
 
 onMounted(async () => {
