@@ -288,6 +288,7 @@ ipcMain.handle('get-settings', () => {
       happiness: 50,
       displayMode: 'always',
       position: { x: 50, y: 0 },
+      positions: { left: null, right: null },
       skins: { left: 'default', right: 'default' },
       petScale: 0.3
     },

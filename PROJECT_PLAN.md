@@ -127,7 +127,11 @@ interface PetState {
   mood: 'happy' | 'normal' | 'sad' | 'angry'  // 心情状态（阈值 75/50/25 四等分）
   happiness: number         // 快乐值 0-100（确认重置到 95，每 20 秒 -1）
   displayMode: 'always' | 'reminder-only'    // 显示模式
-  position: { x: number, y: number }         // 桌面位置
+  position: { x: number, y: number }         // 桌面位置（旧字段，已不使用）
+  positions: {                               // 左右宠物各自拖动后的落点（重启恢复；null=默认左下/右下角）
+    left: { x: number, y: number } | null
+    right: { x: number, y: number } | null
+  }
   skins: { left: string, right: string }     // 左/右宠物服装 id（见 constants/skins.js）
   petScale: number                            // 宠物大小 0.2~0.5（左右共同）
 }

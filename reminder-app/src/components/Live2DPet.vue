@@ -26,10 +26,15 @@ const props = defineProps({
   visible: {
     type: Boolean,
     default: true
+  },
+  // 上次拖动保存的落点 {x,y}；null 表示没拖过，用默认位置（左下/右下角）
+  initialPos: {
+    type: Object,
+    default: null
   }
 })
 
-const emit = defineEmits(['bubble-closed'])
+const emit = defineEmits(['bubble-closed', 'position-changed'])
 
 // 整体缩放：以 BASE_SCALE 为画布内基准，petScale 的变化交给容器 CSS transform 处理，
 // 让「模型」和「四周透明占位框」同步缩放，避免缩放后模型变小、固定透明框残留的违和感。
@@ -63,15 +68,33 @@ function debug(msg) {
 // 拖拽相关
 const isDragging = ref(false)
 const dragStartPos = ref({ x: 0, y: 0 })
+// 本次按下后是否真的拖动过（区分"点了一下"和"拖走了"，前者不必存盘）
+let dragMoved = false
 
-// 位置样式
-const positionStyle = ref({
-  x: props.position === 'left' ? 20 : window.innerWidth - 320,
-  y: window.innerHeight - 420
-})
+// 恢复保存的落点时夹回屏幕内（换显示器/改分辨率后坐标可能整个跑出屏幕）。
+// 边界按"最小缩放下也至少露出约 60px 可点区域"取值；左右宠物的缩放锚点
+// 分别在左下/右下角，所以横向界限不同
+function clampToScreen(pos) {
+  if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return null
+  const minX = props.position === 'left' ? -140 : -240
+  const maxX = props.position === 'left' ? window.innerWidth - 60 : window.innerWidth - 160
+  return {
+    x: Math.min(Math.max(pos.x, minX), maxX),
+    y: Math.min(Math.max(pos.y, -340), window.innerHeight - 200)
+  }
+}
+
+// 位置样式：优先用上次拖动保存的落点，没有则回默认位置（左下/右下角）
+const positionStyle = ref(
+  clampToScreen(props.initialPos) || {
+    x: props.position === 'left' ? 20 : window.innerWidth - 320,
+    y: window.innerHeight - 420
+  }
+)
 
 function startDrag(e) {
   isDragging.value = true
+  dragMoved = false
   const clientX = e.clientX || e.touches?.[0]?.clientX
   const clientY = e.clientY || e.touches?.[0]?.clientY
   dragStartPos.value = { x: clientX - positionStyle.value.x, y: clientY - positionStyle.value.y }
@@ -83,10 +106,14 @@ function onDrag(e) {
   const clientX = e.clientX || e.touches?.[0]?.clientX
   const clientY = e.clientY || e.touches?.[0]?.clientY
   positionStyle.value = { x: clientX - dragStartPos.value.x, y: clientY - dragStartPos.value.y }
+  dragMoved = true
 }
 
 function endDrag() {
+  if (!isDragging.value) return
   isDragging.value = false
+  // 拖动落点交给父组件持久化（PetApp 写入 pet.positions，重启恢复）
+  if (dragMoved) emit('position-changed', { ...positionStyle.value })
 }
 
 // 等待 Live2D 运行时加载

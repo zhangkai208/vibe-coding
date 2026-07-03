@@ -18,6 +18,9 @@ const ready = ref(false)
 const leftSkinFile = ref('model.default.json')
 const rightSkinFile = ref('model.default.json')
 const petScale = ref(0.3)
+// 左右宠物上次拖动保存的落点（null = 没拖过，用组件内默认位置）
+const leftInitialPos = ref(null)
+const rightInitialPos = ref(null)
 
 // 鼠标穿透控制：当鼠标在宠物/气泡上时允许交互，其他区域穿透。
 // mousemove 每秒可触发上百次，缓存上次状态，只在进入/离开宠物区域的翻转瞬间才发 IPC
@@ -102,6 +105,11 @@ function onBubbleClosed() {
   }
 }
 
+// 拖动结束：把该侧落点写进设置（pet.positions 按侧深合并，另一侧不受影响）
+function savePetPosition(side, pos) {
+  settingsStore.saveSettings({ pet: { positions: { [side]: pos } } })
+}
+
 onMounted(async () => {
   // 监听鼠标移动实现穿透控制
   document.addEventListener('mousemove', handleMouseMove)
@@ -120,6 +128,10 @@ onMounted(async () => {
       if (settings.pet.petScale !== undefined) {
         petScale.value = settings.pet.petScale
       }
+      // 恢复两侧宠物拖动落点
+      const positions = settings.pet.positions || {}
+      leftInitialPos.value = positions.left || null
+      rightInitialPos.value = positions.right || null
     }
   } catch {}
   ready.value = true
@@ -148,6 +160,8 @@ onUnmounted(() => {
       :skin-file="leftSkinFile"
       :pet-scale="petScale"
       :visible="petsVisible"
+      :initial-pos="leftInitialPos"
+      @position-changed="pos => savePetPosition('left', pos)"
       @bubble-closed="onBubbleClosed"
     />
 
@@ -160,6 +174,8 @@ onUnmounted(() => {
       :skin-file="rightSkinFile"
       :pet-scale="petScale"
       :visible="petsVisible"
+      :initial-pos="rightInitialPos"
+      @position-changed="pos => savePetPosition('right', pos)"
       @bubble-closed="onBubbleClosed"
     />
   </div>
