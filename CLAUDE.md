@@ -89,6 +89,10 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production）
 
 宠物窗口默认 `setIgnoreMouseEvents(true, { forward: true })`（透明区穿透、但 forward mousemove）。当鼠标进入宠物/气泡区域时，渲染进程通过 `set-pet-interactable` IPC 切换为 `false` 以接收点击，离开再切回穿透。
 
+### 宠物拖动位置持久化
+
+左右宠物各自可拖动，落点存在设置的 `pet.positions.{left,right}`（`null` = 没拖过，用组件内默认的左下/右下角位置）。拖动结束时 `Live2DPet.vue` emit `position-changed`，`PetApp.vue` 按侧调 `saveSettings({ pet: { positions: { [side]: pos } } })`——靠 `save-settings` 的深度合并，改一侧不影响另一侧；启动时从设置恢复传入 `initialPos` prop。注意：`pet.position`（单数）是旧字段，已废弃不使用。
+
 ### 单实例锁
 
 `app.requestSingleInstanceLock()`：抢不到锁直接退出（否则两层宠物叠在一起、提醒响两遍、两套存储互相覆盖）。第二个实例启动时由 `second-instance` 把已有主窗口唤到前台。
