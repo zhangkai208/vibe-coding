@@ -355,8 +355,19 @@ ipcMain.handle('set-auto-launch', (_event, enable) => {
 
 // ===== 主窗口 -> 宠物窗口 =====
 
+// 重新置顶宠物窗口：Windows 的置顶不是一劳永逸的——别的置顶窗口后弹出会压在
+// 上面、全屏/锁屏/唤醒也可能让层级掉下去，而宠物窗口 focusable:false 无法靠
+// 点击自救。所以每次要冒气泡（提醒/预告/问候）前都重新顶一次，保证提醒可见
+function bringPetToFront() {
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.setAlwaysOnTop(true, 'screen-saver')
+    petWindow.moveTop()
+  }
+}
+
 ipcMain.on('trigger-reminder', (_event, data) => {
   if (petWindow) {
+    bringPetToFront()
     petWindow.webContents.send('pet-message', {
       type: 'trigger-reminder',
       content: data.content,
@@ -408,6 +419,7 @@ ipcMain.on('sync-pet-state', (_event, data) => {
 
 ipcMain.on('preview-reminder', (_event, data) => {
   if (petWindow) {
+    bringPetToFront()
     petWindow.webContents.send('pet-message', {
       type: 'preview-reminder',
       position: data.position
@@ -418,6 +430,7 @@ ipcMain.on('preview-reminder', (_event, data) => {
 // 时段问候（工作时段起/止）：转发到宠物窗口，展示为纯消息气泡
 ipcMain.on('trigger-greeting', (_event, data) => {
   if (petWindow) {
+    bringPetToFront()
     petWindow.webContents.send('pet-message', {
       type: 'greeting',
       content: data.content,
