@@ -21,6 +21,8 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production）
 
 注意：`npm run dev` 单独跑前端时没有 Electron 主进程，所有 IPC 依赖会失效，调试宠物/提醒必须在 `electron:dev` 下进行。
 
+**`electron:dev` 为何走 `node electron/dev.js` 而非 `electron .`**：VSCode（及任何 Electron 宿主）会向派生子进程注入 `ELECTRON_RUN_AS_NODE=1`，让 electron 以「纯 Node」模式启动——此时 `app`/`BrowserWindow` 为 undefined，窗口起不来、preload/IPC/electron-store 全失效（典型表现：界面看着在，但设置存不进去）。`dev.js` 在 spawn electron 前先 `delete process.env.ELECTRON_RUN_AS_NODE`（设空串无效，electron 只要检测到该变量存在就当 Node 模式）。这个包装脚本不能省，也别在终端里直接跑 `electron .` 调试。
+
 无测试、无 lint 配置。
 
 ## 架构
@@ -64,6 +66,7 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production）
 - 触发前 10 秒发"预告"（`previewSent` Set 去重）。
 - tick 早返回条件：全局暂停 / 系统空闲 / 不在工作时段内（且工作时段开关打开）。
 - `nowMs` 是每秒刷新的响应式时钟，专门给"下次提醒倒计时"computed 用——`Date.now()` 非响应式，直接用会导致倒计时不动。
+- **时段问候**是调度 tick 的另一条产物：每个 tick 跨过工作时段起/止点的那一分钟，发一条纯消息气泡（`trigger-greeting` → 宠物窗口 `greeting` 类型：无按钮、自动消失、**不影响好感度**），起/止各每天只发一次（靠内存里的 `greetingSentOn` 去重，不持久化）。开工问候固定走左侧 22、下班走右侧 33。
 
 ### 心情系统（`src/stores/pet.js`）
 
@@ -89,6 +92,10 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production）
 
 宠物窗口默认 `setIgnoreMouseEvents(true, { forward: true })`（透明区穿透、但 forward mousemove）。当鼠标进入宠物/气泡区域时，渲染进程通过 `set-pet-interactable` IPC 切换为 `false` 以接收点击，离开再切回穿透。
 
+### 宠物窗口置顶需重复声明
+
+宠物窗口 `focusable: false`，无法靠点击自救回到最顶层。而 Windows 的 always-on-top 不是一劳永逸：别的置顶窗口后弹出、全屏、锁屏、系统唤醒都可能把它的层级压下去。所以主进程在每次要冒气泡（提醒 / 预告 / 问候）前都调一次 `bringPetToFront()`——`setAlwaysOnTop(true, 'screen-saver')` + `moveTop()` 重新抢顶。新增任何"让宠物说话"的路径都要带上这一步，否则气泡可能被别的窗口挡住（见提交 `fix:修复宠物提醒被遮挡的问题`）。
+
 ### 宠物拖动位置持久化
 
 左右宠物各自可拖动，落点存在设置的 `pet.positions.{left,right}`（`null` = 没拖过，用组件内默认的左下/右下角位置）。拖动结束时 `Live2DPet.vue` emit `position-changed`，`PetApp.vue` 按侧调 `saveSettings({ pet: { positions: { [side]: pos } } })`——靠 `save-settings` 的深度合并，改一侧不影响另一侧；启动时从设置恢复传入 `initialPos` prop。注意：`pet.position`（单数）是旧字段，已废弃不使用。
@@ -99,7 +106,7 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production）
 
 ### 多入口构建
 
-`vite.config.js` 用 `rollupOptions.input` 配置 `index.html` + `pet.html` 双入口，`base: './'`、`assetsInlineLimit: 0`（确保 Live2D 模型文件不被内联）。
+`vite.config.js` 用 `rollupOptions.input` 配置 `index.html` + `pet.html` 双入口，`base: './'`、`assetsInlineLimit: 0`（确保 Live2D 模型文件不被内联）。主窗口路由用 `createWebHashHistory`（`#/`），不能用默认的 HTML5 history——生产环境主进程用 `loadFile(dist/index.html)` 走 `file://` 协议，history 模式在 `file://` 下刷新/深链会 404。
 
 ## 编辑约定
 
