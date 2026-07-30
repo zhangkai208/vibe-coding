@@ -92,6 +92,21 @@ const positionStyle = ref(
   }
 )
 
+// 窗口尺寸变化时（主进程在屏幕就绪后 setBounds 纠正、或用户改了分辨率）重算落点：
+// 默认位置按新尺寸重算到左下/右下角；拖动落点按新屏幕重新夹紧——否则开机自启时
+// 宠物会一直停在旧小窗口算出的左上坐标里
+function handleResize() {
+  if (props.initialPos) {
+    const clamped = clampToScreen(props.initialPos)
+    if (clamped) positionStyle.value = clamped
+  } else {
+    positionStyle.value = {
+      x: props.position === 'left' ? 20 : window.innerWidth - 320,
+      y: window.innerHeight - 420
+    }
+  }
+}
+
 function startDrag(e) {
   isDragging.value = true
   dragMoved = false
@@ -409,6 +424,7 @@ onMounted(() => {
   window.addEventListener('mouseup', endDrag)
   window.addEventListener('touchmove', onDrag)
   window.addEventListener('touchend', endDrag)
+  window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
@@ -416,6 +432,7 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', endDrag)
   window.removeEventListener('touchmove', onDrag)
   window.removeEventListener('touchend', endDrag)
+  window.removeEventListener('resize', handleResize)
   if (nextSpeechTimer) {
     clearTimeout(nextSpeechTimer)
     nextSpeechTimer = null

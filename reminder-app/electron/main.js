@@ -1,9 +1,20 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, powerMonitor, shell } = require('electron')
 const path = require('path')
+const fs = require('fs')
 const Store = require('electron-store')
 
 // 初始化本地存储
 const store = new Store()
+
+// 诊断日志：dev 打终端；打包后没有终端、console.log 会丢，所以同时追加写到
+// userData 下的 pet-window-debug.log，开机自启 / 休眠唤醒后也能事后查看
+function debugLog(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`
+  console.log(line)
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'pet-window-debug.log'), line + '\n')
+  } catch (e) { /* 写盘失败忽略，不影响主流程 */ }
+}
 
 // 应用图标路径：dev 用 public/，打包后用 dist/（vite 构建时已把 public 复制到 dist）
 const isDev = process.env.NODE_ENV === 'development'
@@ -92,15 +103,31 @@ function createMainWindow() {
   })
 }
 
+// 按主显示器工作区把宠物窗口铺满。开机自启时显卡驱动/DPI/多显示器往往还没就绪，
+// 此时拿到的 workArea 是临时的小值——屏幕稳定后会触发 display-metrics-changed，
+// 由本函数把窗口重新铺满到正确尺寸（否则宠物会挤在屏幕左上角的小区域里、显得变小）
+function refitPetWindow() {
+  if (!petWindow || petWindow.isDestroyed()) return
+  const display = screen.getPrimaryDisplay()
+  const { x, y, width, height } = display.workArea
+  const old = petWindow.getBounds()
+  // 仅在 bounds 真的与工作区不一致时记录（真正失配的时刻），避免每次冒气泡都刷日志
+  if (old.x !== x || old.y !== y || old.width !== width || old.height !== height) {
+    debugLog(`[PetWindow] bounds 失配，纠正 old=${JSON.stringify(old)} new=${JSON.stringify({ x, y, width, height })} scaleFactor=${display.scaleFactor}`)
+  }
+  petWindow.setBounds({ x, y, width, height })
+}
+
 // 创建宠物窗口（透明，始终置顶）
 function createPetWindow() {
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  const workArea = screen.getPrimaryDisplay().workArea
+  debugLog(`[PetWindow] init ${JSON.stringify({ ...workArea, scaleFactor: screen.getPrimaryDisplay().scaleFactor })}`)
 
   petWindow = new BrowserWindow({
-    width: width,
-    height: height,
-    x: 0,
-    y: 0,
+    width: workArea.width,
+    height: workArea.height,
+    x: workArea.x,
+    y: workArea.y,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -123,6 +150,12 @@ function createPetWindow() {
 
   // 让透明区域点击穿透（forward:true 允许 mousemove 事件传递）
   petWindow.setIgnoreMouseEvents(true, { forward: true })
+
+  // 屏幕分辨率/DPI/显示器插拔变化时，把窗口重新铺满到正确工作区（见 refitPetWindow）。
+  // 覆盖：开机自启屏幕迟就绪、运行中改分辨率/缩放、插拔显示器
+  screen.on('display-metrics-changed', refitPetWindow)
+  screen.on('display-added', refitPetWindow)
+  screen.on('display-removed', refitPetWindow)
 
   // 动态切换点击穿透：当鼠标在宠物/气泡上时可交互，其他区域穿透
   ipcMain.on('set-pet-interactable', (_event, interactable) => {
@@ -355,11 +388,14 @@ ipcMain.handle('set-auto-launch', (_event, enable) => {
 
 // ===== 主窗口 -> 宠物窗口 =====
 
-// 重新置顶宠物窗口：Windows 的置顶不是一劳永逸的——别的置顶窗口后弹出会压在
-// 上面、全屏/锁屏/唤醒也可能让层级掉下去，而宠物窗口 focusable:false 无法靠
-// 点击自救。所以每次要冒气泡（提醒/预告/问候）前都重新顶一次，保证提醒可见
+// 冒气泡前把宠物窗口拉回最前。两件事一起做：
+// 1) refitPetWindow 把窗口重新铺满到当前 workArea——休眠唤醒/锁屏/拔显示器等会让
+//    窗口 bounds 与屏幕失配（典型表现：宠物只剩半只、或整只跑到屏幕外、必须退出重启
+//    才恢复），而 focusable:false 的窗口无法自愈，这里顺带校准，下次提醒即恢复
+// 2) 重新置顶：Windows 的置顶不是一劳永逸，别的置顶窗口弹出/全屏/锁屏/唤醒都可能压下去
 function bringPetToFront() {
   if (petWindow && !petWindow.isDestroyed()) {
+    refitPetWindow()
     petWindow.setAlwaysOnTop(true, 'screen-saver')
     petWindow.moveTop()
   }
@@ -499,11 +535,17 @@ function startIdleMonitor() {
       mainWindow.webContents.send('idle-state-changed', false)
     }
   })
+
+  // 系统唤醒 / 解锁后，宠物窗口的 bounds 与层级常会失配（典型表现：宠物只剩半只、或
+  // 整只消失，必须退出重启才恢复）。bringPetToFront 会顺带校准 bounds + 重新置顶，让它自愈
+  powerMonitor.on('resume', bringPetToFront)
+  powerMonitor.on('unlock-screen', bringPetToFront)
 }
 
 // ===== 应用生命周期 =====
 
 app.whenReady().then(() => {
+  debugLog(`[App] 启动；日志文件位于 ${path.join(app.getPath('userData'), 'pet-window-debug.log')}`)
   createMainWindow()
   createPetWindow()
   createTray()
