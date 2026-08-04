@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run electron:dev     # 开发：并行启动 vite (5173) + Electron 主进程，连本地 dev server
 npm run dev              # 仅前端（无 Electron，window.electronAPI 不存在，宠物/提醒功能不可用）
 npm run electron:build   # 生产打包：vite build + electron-builder → release/（NSIS Windows 安装包）
-npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production）
+npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production，需先 vite build，否则 dist 不存在）
 ```
 
 注意：`npm run dev` 单独跑前端时没有 Electron 主进程，所有 IPC 依赖会失效，调试宠物/提醒必须在 `electron:dev` 下进行。
@@ -72,6 +72,8 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production）
 
 `happiness` 0–100，每 20 秒自然衰减 1。阈值 75/50/25 四等分对应 happy/normal/sad/angry 四档循环。确认提醒重置到 95，忽略扣 15（下限 0）。心情变化通过 `sync-pet-state` IPC 推到宠物窗口换表情。
 
+**表情不是 Live2D expression/motion，而是参数叠加层**（`src/utils/moodOverlay.js`）：挂在 pixi-live2d-display 的 `beforeModelUpdate` 钩子上，每帧用与眨眼/呼吸相同的方式把心情偏移叠加到 Cubism 参数（角度/脸红/眼型走 `addToParamFloat` 叠加，眼睛开合走乘法以保留眨眼），靠引擎的 `saveParam`/`loadParam` 机制保证不累积漂移，切换时指数插值平滑过渡。调表情观感改 `MOOD_OVERLAYS` 数值表即可，别去改动作文件。
+
 ### 设置持久化（electron-store）
 
 主进程用 `electron-store` 存单个 `settings` key。`save-settings` IPC 做**深度合并**（`deepMerge`），不是整体覆盖——渲染进程只传改动字段即可。`get-settings` 带完整默认值兜底。
@@ -92,9 +94,18 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production）
 
 宠物窗口默认 `setIgnoreMouseEvents(true, { forward: true })`（透明区穿透、但 forward mousemove）。当鼠标进入宠物/气泡区域时，渲染进程通过 `set-pet-interactable` IPC 切换为 `false` 以接收点击，离开再切回穿透。
 
-### 宠物窗口置顶需重复声明
+### 宠物窗口的层级与 bounds 需主动自愈
 
-宠物窗口 `focusable: false`，无法靠点击自救回到最顶层。而 Windows 的 always-on-top 不是一劳永逸：别的置顶窗口后弹出、全屏、锁屏、系统唤醒都可能把它的层级压下去。所以主进程在每次要冒气泡（提醒 / 预告 / 问候）前都调一次 `bringPetToFront()`——`setAlwaysOnTop(true, 'screen-saver')` + `moveTop()` 重新抢顶。新增任何"让宠物说话"的路径都要带上这一步，否则气泡可能被别的窗口挡住（见提交 `fix:修复宠物提醒被遮挡的问题`）。
+宠物窗口 `focusable: false`，出问题无法靠用户点击自救，主进程必须主动修两类失配：
+
+- **层级掉落**：Windows 的 always-on-top 不是一劳永逸，别的置顶窗口后弹出、全屏、锁屏、系统唤醒都可能把它压下去（表现：气泡被挡住）。
+- **bounds 失配**：开机自启时屏幕分辨率/DPI 尚未就绪，窗口按临时小 workArea 创建（宠物变小、挤在左上角）；休眠唤醒/锁屏/拔显示器后 bounds 也会与屏幕失配（宠物只剩半只或整只消失）。
+
+自愈机制（`electron/main.js`）：`refitPetWindow()` 按最新 `workArea` 重新 `setBounds`；`bringPetToFront()` = refit + `setAlwaysOnTop(true, 'screen-saver')` + `moveTop()`。触发点有三处：每次冒气泡（提醒/预告/问候）前、`screen` 的 `display-metrics-changed/added/removed`、`powerMonitor` 的 `resume`/`unlock-screen`（后两者分别挂在 `createPetWindow` / `startIdleMonitor` 里）。**新增任何"让宠物说话"的路径都要先调 `bringPetToFront()`**。渲染侧 `Live2DPet.vue` 监听 window `resize`：主进程纠正 bounds 后重算宠物落点（拖过的位置重新夹紧进屏幕，默认位置重算到左下/右下角）。
+
+**上述 refit 全都信任 `screen` 模块，但开机自启/休眠唤醒后 `screen` 本身可能整体停在错误读数**（如实际 1707×912@1.5 却一直报 1920×1080@1，且 `display-metrics-changed` 不补发）——此时 refit 空转，永远修不好。兜底是 `runDisplayWatchdog(trigger, allowRelaunch)`：上次正常会话的显示器指纹持久化在 electron-store 的 `lastDisplaySignature` key；`--hidden` 自启和 `resume`/`unlock-screen` 时若读数与指纹不符，轮询等 90 秒，等不来任何 display 事件就判定读数陈旧、`app.relaunch()` 静默重启一次（重启参数强制带 `--hidden`，并带 `--dpi-relaunched` 标记防循环；boot 场景重启后仍不符则接受当前读数——视为用户真的换了屏；唤醒时主窗口正被使用则不重启只等事件）。指纹比对宽高容忍 ±2px（Windows 缩放下 workArea 有 1707/1708 抖动）。另：Windows 偶发弄丢 `skipTaskbar`（任务栏出现点了没反应的幽灵图标），`refitPetWindow` 每次幂等重申 `setSkipTaskbar(true)`，主窗口静默启动期间也 skipTaskbar、`show` 时恢复。
+
+排查这类问题看 `%APPDATA%/reminder-app`（`userData`）下的 `pet-window-debug.log`——打包后没有终端、`console.log` 会丢，主进程把 bounds 失配诊断落盘到这里（仅真失配时记录，不刷屏）。
 
 ### 宠物拖动位置持久化
 

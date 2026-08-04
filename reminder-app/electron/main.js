@@ -70,6 +70,11 @@ function createMainWindow() {
   // 隐藏默认菜单栏
   mainWindow.setMenuBarVisibility(false)
 
+  // 静默自启时主窗口虽不 show，但 Windows 偶发会给它留一个点了没反应的任务栏
+  // 幽灵图标；隐藏期先 skipTaskbar，真正显示时再恢复正常任务栏行为
+  if (startHidden) mainWindow.setSkipTaskbar(true)
+  mainWindow.on('show', () => mainWindow.setSkipTaskbar(false))
+
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173')
   } else {
@@ -116,6 +121,107 @@ function refitPetWindow() {
     debugLog(`[PetWindow] bounds 失配，纠正 old=${JSON.stringify(old)} new=${JSON.stringify({ x, y, width, height })} scaleFactor=${display.scaleFactor}`)
   }
   petWindow.setBounds({ x, y, width, height })
+  // Windows 在 DPI 变化/启动早期偶发弄丢 skipTaskbar，任务栏会多出一个点了没反应的
+  // 幽灵图标（focusable:false 的本窗口点击无响应）。这里幂等重申，借每次 refit 自愈
+  petWindow.setSkipTaskbar(true)
+}
+
+// ===== 显示器指纹与开机自启 DPI 看门狗 =====
+// 根因（2026-08-04 日志实锤）：开机自启时 Electron 的 screen 模块可能整体停留在
+// 桌面就绪前的错误读数（如 1920×1080@1，实际 1707×912@1.5），且 display-metrics-changed
+// 一直不补发——refitPetWindow 读到的 workArea 本身就是错的，所有自愈路径全部空转。
+// 对策：把「上次正常会话的显示器指纹」持久化；静默自启时若当前读数与指纹不符、
+// 又等不来任何 display 事件，判定 screen 读数陈旧，原地重启一次应用（此时桌面已
+// 就绪，重启后读数即正确）。--dpi-relaunched 标记保证最多重启一次，防死循环。
+
+const SIG_KEY = 'lastDisplaySignature'
+
+function currentDisplaySignature() {
+  const d = screen.getPrimaryDisplay()
+  return { ...d.workArea, scaleFactor: d.scaleFactor }
+}
+
+// 宽高容忍 ±2px：Windows 150% 缩放下 workArea 宽度会在 1707/1708 间反复抖（见历史日志），不算失配
+function signatureMatches(a, b) {
+  if (!a || !b) return false
+  return a.scaleFactor === b.scaleFactor &&
+    a.x === b.x && a.y === b.y &&
+    Math.abs(a.width - b.width) <= 2 &&
+    Math.abs(a.height - b.height) <= 2
+}
+
+// 本次会话收到过的 display 事件数——事件在流动说明 screen 模块是活的、读数可信。
+// 用计数而非布尔：唤醒时的看门狗只关心「唤醒之后」有没有新事件，开机时的旧事件不算数
+let displayEventCount = 0
+// 看门狗单例定时器（开机与唤醒共用，避免并发两轮）
+let watchdogTimer = null
+
+// 判定 screen 读数是否陈旧并自愈。trigger 仅用于日志；allowRelaunch 控制超时后
+// 能否用静默重启自愈（唤醒时若主窗口正被使用则不重启、只记日志等 display 事件）
+function runDisplayWatchdog(trigger, allowRelaunch) {
+  const now0 = currentDisplaySignature()
+  const stored = store.get(SIG_KEY)
+  if (!stored || signatureMatches(stored, now0)) {
+    store.set(SIG_KEY, now0)
+    return
+  }
+  if (watchdogTimer) return
+
+  const eventCount0 = displayEventCount
+  const relaunched = process.argv.includes('--dpi-relaunched')
+  debugLog(`[Watchdog] (${trigger}) 读数与指纹不符 stored=${JSON.stringify(stored)} now=${JSON.stringify(now0)} relaunched=${relaunched} allowRelaunch=${allowRelaunch}`)
+
+  const INTERVAL = 5 * 1000
+  const TIMEOUT = 90 * 1000
+  let waited = 0
+  watchdogTimer = setInterval(() => {
+    waited += INTERVAL
+    const now = currentDisplaySignature()
+    // 期间来过新事件（事件处理里已刷新指纹）或读数自己恢复了：铺回窗口，收工
+    if (displayEventCount > eventCount0 || signatureMatches(stored, now)) {
+      debugLog(`[Watchdog] (${trigger}) 读数恢复 now=${JSON.stringify(now)} 新事件数=${displayEventCount - eventCount0}`)
+      clearInterval(watchdogTimer)
+      watchdogTimer = null
+      store.set(SIG_KEY, now)
+      refitPetWindow()
+      return
+    }
+    if (waited >= TIMEOUT) {
+      clearInterval(watchdogTimer)
+      watchdogTimer = null
+      if (allowRelaunch && !relaunched) {
+        debugLog(`[Watchdog] (${trigger}) 超时且无 display 事件，判定 screen 读数陈旧，静默重启自愈`)
+        isQuitting = true
+        // 重启参数：去掉旧标记、补上 --hidden（唤醒场景下手动启动的会话重启后
+        // 不能让主窗口突然弹出来）、带上防循环标记
+        const args = process.argv.slice(1).filter(a => a !== '--dpi-relaunched')
+        if (!args.includes('--hidden')) args.push('--hidden')
+        args.push('--dpi-relaunched')
+        app.relaunch({ args })
+        app.exit(0)
+      } else if (trigger === 'boot' && relaunched) {
+        // 重启过一次还对不上：多半是用户真的换了分辨率/显示器，接受当前读数
+        debugLog(`[Watchdog] (boot) 重启后读数仍不符，接受当前读数 now=${JSON.stringify(now)}`)
+        store.set(SIG_KEY, now)
+        refitPetWindow()
+      } else {
+        // 不便重启（主窗口使用中等）：保留好指纹，指望后续 display 事件 / 冒气泡 refit 修复
+        debugLog(`[Watchdog] (${trigger}) 超时放弃本轮，保留指纹等待 display 事件`)
+      }
+      return
+    }
+    // screen 若无事件地悄悄修正了读数，这里也能把窗口铺回去
+    refitPetWindow()
+  }, INTERVAL)
+}
+
+// 开机检查：手动启动时桌面必然已就绪、读数可信，直接刷指纹；静默自启才需要看门狗
+function startDisplayWatchdog() {
+  if (!startHidden) {
+    store.set(SIG_KEY, currentDisplaySignature())
+    return
+  }
+  runDisplayWatchdog('boot', true)
 }
 
 // 创建宠物窗口（透明，始终置顶）
@@ -151,11 +257,17 @@ function createPetWindow() {
   // 让透明区域点击穿透（forward:true 允许 mousemove 事件传递）
   petWindow.setIgnoreMouseEvents(true, { forward: true })
 
-  // 屏幕分辨率/DPI/显示器插拔变化时，把窗口重新铺满到正确工作区（见 refitPetWindow）。
+  // 屏幕分辨率/DPI/显示器插拔变化时，把窗口重新铺满到正确工作区（见 refitPetWindow），
+  // 同时刷新显示器指纹、标记 screen 模块可信（给开机自启看门狗判断用）。
   // 覆盖：开机自启屏幕迟就绪、运行中改分辨率/缩放、插拔显示器
-  screen.on('display-metrics-changed', refitPetWindow)
-  screen.on('display-added', refitPetWindow)
-  screen.on('display-removed', refitPetWindow)
+  const onDisplayChanged = () => {
+    displayEventCount++
+    store.set(SIG_KEY, currentDisplaySignature())
+    refitPetWindow()
+  }
+  screen.on('display-metrics-changed', onDisplayChanged)
+  screen.on('display-added', onDisplayChanged)
+  screen.on('display-removed', onDisplayChanged)
 
   // 动态切换点击穿透：当鼠标在宠物/气泡上时可交互，其他区域穿透
   ipcMain.on('set-pet-interactable', (_event, interactable) => {
@@ -537,9 +649,16 @@ function startIdleMonitor() {
   })
 
   // 系统唤醒 / 解锁后，宠物窗口的 bounds 与层级常会失配（典型表现：宠物只剩半只、或
-  // 整只消失，必须退出重启才恢复）。bringPetToFront 会顺带校准 bounds + 重新置顶，让它自愈
-  powerMonitor.on('resume', bringPetToFront)
-  powerMonitor.on('unlock-screen', bringPetToFront)
+  // 整只消失）。bringPetToFront 校准 bounds + 重新置顶；此外唤醒后 screen 模块的读数
+  // 也可能整体陈旧（同开机自启，refit 拿错值空转），所以再跑一轮看门狗——主窗口正被
+  // 使用时不重启（免得打断用户），只等 display 事件；否则超时后静默重启自愈
+  const onWakeUp = () => {
+    bringPetToFront()
+    const mainInUse = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
+    runDisplayWatchdog('wake', !mainInUse)
+  }
+  powerMonitor.on('resume', onWakeUp)
+  powerMonitor.on('unlock-screen', onWakeUp)
 }
 
 // ===== 应用生命周期 =====
@@ -550,6 +669,7 @@ app.whenReady().then(() => {
   createPetWindow()
   createTray()
   startIdleMonitor()
+  startDisplayWatchdog()
 
   // 设置开机自启
   const settings = store.get('settings', {})
