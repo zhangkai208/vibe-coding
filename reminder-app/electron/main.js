@@ -237,6 +237,9 @@ function createPetWindow() {
     transparent: true,
     frame: false,
     alwaysOnTop: true,
+    // 先不显示，等 ready-to-show 时"先 skip 再 show"——这是让透明窗口可靠跳过
+    // 任务栏的关键顺序（见下方三道防线）
+    show: false,
     skipTaskbar: true,
     resizable: false,
     focusable: false,
@@ -256,6 +259,30 @@ function createPetWindow() {
 
   // 让透明区域点击穿透（forward:true 允许 mousemove 事件传递）
   petWindow.setIgnoreMouseEvents(true, { forward: true })
+
+  // 透明（layered）窗口在 Windows 上，构造选项里的 skipTaskbar 不可靠——开机自启时
+  // explorer/DPI 尚未就绪的竞态下，窗口会钻进任务栏形成"点了没反应的幽灵图标"
+  //（focusable:false 导致点它没反应）。单靠 refitPetWindow 的重申不够：refit 只在
+  // 冒气泡/显示器事件时才跑，开机后到首次冒气泡之间没有重申机会。这里用三道防线：
+  // 1) 创建后立即显式 setSkipTaskbar（不依赖构造选项）；
+  // 2) ready-to-show 里"先 skip 再 show"——让透明窗口可靠跳过任务栏的关键顺序；
+  // 3) show 后 1.5s 再兜底重申一次，覆盖开机早期 explorer/DPI 抖动。
+  // 各点把 isSkipTaskbar() 真实值落盘到 pet-window-debug.log，便于事后核验
+  petWindow.setSkipTaskbar(true)
+  debugLog(`[PetWindow] 创建后 skipTaskbar=${petWindow.isSkipTaskbar()}`)
+
+  petWindow.once('ready-to-show', () => {
+    petWindow.setSkipTaskbar(true)
+    debugLog(`[PetWindow] ready-to-show skipTaskbar=${petWindow.isSkipTaskbar()}`)
+    petWindow.show()
+    debugLog(`[PetWindow] show 后 skipTaskbar=${petWindow.isSkipTaskbar()}`)
+    setTimeout(() => {
+      if (petWindow && !petWindow.isDestroyed()) {
+        petWindow.setSkipTaskbar(true)
+        debugLog(`[PetWindow] 兜底重申 skipTaskbar=${petWindow.isSkipTaskbar()}`)
+      }
+    }, 1500)
+  })
 
   // 屏幕分辨率/DPI/显示器插拔变化时，把窗口重新铺满到正确工作区（见 refitPetWindow），
   // 同时刷新显示器指纹、标记 screen 模块可信（给开机自启看门狗判断用）。
