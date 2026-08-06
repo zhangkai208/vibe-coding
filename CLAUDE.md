@@ -27,6 +27,23 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production，�
 
 ## 架构
 
+### 代码地图（按职责，快速定位）
+
+主进程 `electron/`：
+- `main.js` — 双窗口创建、所有 IPC 中转、托盘、空闲检测、显示器指纹看门狗、开机自启。两个窗口之间不直接通信，全部经此中转。
+- `preload.js` — `contextBridge` 暴露的 `window.electronAPI`：一批发送方法 + 若干 `onXxx` / `removeXxxListener` 监听对（每对都存回调引用以便精确移除）。
+- `dev.js` — dev 启动包装器，唯一目的：spawn electron 前删掉 `ELECTRON_RUN_AS_NODE`（见「常用命令」）。
+
+渲染进程 `src/`：
+- `App.vue` — 主窗口根。**运行时入口都在 `onMounted`**：加载设置 → 恢复提醒/宠物状态 → `reminderStore.startScheduler()` + `petStore.startHappinessDecay()` → 挂 4 个 IPC 监听（提醒响应 / 空闲 / 暂停 / 跳到下一条）。`watch` 负责把状态写回 electron-store。
+- `PetApp.vue` — 宠物窗口根。监听 `onPetMessage` 按 `type` 分发给左右两只宠物；鼠标穿透的翻转判定也在这里（`elementFromPoint` + 状态缓存）。
+- `components/Live2DPet.vue` — 单只宠物：模型加载（本地优先 CDN 兜底）、挂 `moodOverlay`、拖拽落点、监听 `resize` 重算落点、视线跟随。
+- `components/SpeechBubble.vue` — 对话气泡：打字机文案 + 确认/推迟/忽略按钮 + 自动消失倒计时；`showActions=false` 时为纯消息气泡（时段问候用）。
+- `stores/{reminder,pet,settings}.js` — 三个 Pinia store（调度 / 心情 / 设置），职责与下文各小节一一对应。
+- `utils/moodOverlay.js` `utils/time.js` — 心情参数叠加层 / 工作时段与时间格式化。
+- `constants/skins.js`（19 套服装清单）`constants/presets.js`（提醒预设）。
+- `views/{Home,Settings}.vue`（主窗口两个 hash 路由页）+ `components/{TitleBar,AddReminder,ReminderCard}.vue`（标题栏 / 增删 / 列表 UI）。
+
 ### 双窗口架构（核心）
 
 应用有两个独立的 Electron 窗口，各自挂一套独立的 Vue 应用，靠主进程中转 IPC 通信：
@@ -78,6 +95,12 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production，�
 
 主进程用 `electron-store` 存单个 `settings` key。`save-settings` IPC 做**深度合并**（`deepMerge`），不是整体覆盖——渲染进程只传改动字段即可。`get-settings` 带完整默认值兜底。
 
+### 渲染进程生命周期与持久化的非显然点
+
+- **推迟时长来自全局默认，不在提醒上**：用户点「推迟」时宠物窗口只回传 `reminderId`，主窗口 `App.vue` 的 `handleReminderResponse` 用 `settingsStore.reminderDefaults.postponeMinutes`（默认 5）当推迟分钟数。改推迟行为改这里，不是改 `reminder.js`。
+- **好感度落盘被节流**：自然衰减每 20 秒 -1，逐次写盘无意义；`App.vue` 的 watch 把 happiness 持久化节流到 5 分钟一次，但确认/忽略造成的跳变（`|Δ|>1`）仍立即落盘。
+- **宠物窗口写设置必须绕开 `settingsStore.saveSettings`**：`PetApp.vue` 的 `savePetPosition` 直接调 `window.electronAPI.saveSettings`，**不**走 store 包装器——后者会把本窗口启动时加载的 `autoLaunch`/`workingHours`/`idleThreshold` 等旧值一并写回，覆盖用户随后在主窗口改的新设置。宠物窗口写设置时一律只传**改动的那一个字段**（靠主进程 `deepMerge` 只合并这一处）。主窗口用 store 包装器没问题，因为它持有这些字段的最新值。
+
 ### Live2D 模型加载
 
 模型来自 [imuncle/live2d](https://github.com/imuncle/live2d)（⚠️ 仅学习/非商业用途）。模型资源本地化到 `public/models/{22,33}/`，运行时**本地优先、CDN 兜底**：先 `Live2DModel.from('./models/...')`，catch 后回退 `cdn.jsdelivr.net`。服装切换通过加载不同 `model.*.json`（共用 `.moc`、只换贴图）实现，服装清单见 `src/constants/skins.js`（19 套，22/33 通用）。Live2D 运行时脚本（`live2d.min.js` / `live2dcubismcore.min.js`）在 `public/lib/`，HTML 里 `onerror` 回退 CDN。
@@ -103,7 +126,7 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production，�
 
 自愈机制（`electron/main.js`）：`refitPetWindow()` 按最新 `workArea` 重新 `setBounds`；`bringPetToFront()` = refit + `setAlwaysOnTop(true, 'screen-saver')` + `moveTop()`。触发点有三处：每次冒气泡（提醒/预告/问候）前、`screen` 的 `display-metrics-changed/added/removed`、`powerMonitor` 的 `resume`/`unlock-screen`（后两者分别挂在 `createPetWindow` / `startIdleMonitor` 里）。**新增任何"让宠物说话"的路径都要先调 `bringPetToFront()`**。渲染侧 `Live2DPet.vue` 监听 window `resize`：主进程纠正 bounds 后重算宠物落点（拖过的位置重新夹紧进屏幕，默认位置重算到左下/右下角）。
 
-**上述 refit 全都信任 `screen` 模块，但开机自启/休眠唤醒后 `screen` 本身可能整体停在错误读数**（如实际 1707×912@1.5 却一直报 1920×1080@1，且 `display-metrics-changed` 不补发）——此时 refit 空转，永远修不好。兜底是 `runDisplayWatchdog(trigger, allowRelaunch)`：上次正常会话的显示器指纹持久化在 electron-store 的 `lastDisplaySignature` key；`--hidden` 自启和 `resume`/`unlock-screen` 时若读数与指纹不符，轮询等 90 秒，等不来任何 display 事件就判定读数陈旧、`app.relaunch()` 静默重启一次（重启参数强制带 `--hidden`，并带 `--dpi-relaunched` 标记防循环；boot 场景重启后仍不符则接受当前读数——视为用户真的换了屏；唤醒时主窗口正被使用则不重启只等事件）。指纹比对宽高容忍 ±2px（Windows 缩放下 workArea 有 1707/1708 抖动）。另：Windows 偶发弄丢 `skipTaskbar`（任务栏出现点了没反应的幽灵图标），`refitPetWindow` 每次幂等重申 `setSkipTaskbar(true)`，主窗口静默启动期间也 skipTaskbar、`show` 时恢复。
+**上述 refit 全都信任 `screen` 模块，但开机自启/休眠唤醒后 `screen` 本身可能整体停在错误读数**（如实际 1707×912@1.5 却一直报 1920×1080@1，且 `display-metrics-changed` 不补发）——此时 refit 空转，永远修不好。兜底是 `runDisplayWatchdog(trigger, allowRelaunch)`：上次正常会话的显示器指纹持久化在 electron-store 的 `lastDisplaySignature` key；`--hidden` 自启和 `resume`/`unlock-screen` 时若读数与指纹不符，轮询等 90 秒，等不来任何 display 事件就判定读数陈旧、`app.relaunch()` 静默重启一次（重启参数强制带 `--hidden`，并带 `--dpi-relaunched` 标记防循环；boot 场景重启后仍不符则接受当前读数——视为用户真的换了屏；唤醒时主窗口正被使用则不重启只等事件）。指纹比对宽高容忍 ±2px（Windows 缩放下 workArea 有 1707/1708 抖动）。另：宠物窗口是透明（layered）窗口，Windows 上其构造选项 `skipTaskbar` 不可靠——开机自启时 explorer/DPI 未就绪的竞态下会钻进任务栏，形成"点了没反应的幽灵图标"（`focusable:false` 导致点不动）。单靠 `refitPetWindow` 的重申不够（refit 只在冒气泡/显示器事件时才跑，开机后到首次冒气泡之间没有重申机会）。`createPetWindow` 用三道防线确保不进任务栏：构造 `show:false`、创建后立即显式 `setSkipTaskbar(true)`、`ready-to-show` 里"先 skip 再 show"且 show 后 1.5s 兜底重申一次；各点把 `isSkipTaskbar()` 落盘到 `pet-window-debug.log` 便于核验。主窗口静默启动期间也 skipTaskbar、`show` 时恢复。
 
 排查这类问题看 `%APPDATA%/reminder-app`（`userData`）下的 `pet-window-debug.log`——打包后没有终端、`console.log` 会丢，主进程把 bounds 失配诊断落盘到这里（仅真失配时记录，不刷屏）。
 
