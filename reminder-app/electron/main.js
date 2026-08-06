@@ -267,19 +267,19 @@ function createPetWindow() {
   // 1) 创建后立即显式 setSkipTaskbar（不依赖构造选项）；
   // 2) ready-to-show 里"先 skip 再 show"——让透明窗口可靠跳过任务栏的关键顺序；
   // 3) show 后 1.5s 再兜底重申一次，覆盖开机早期 explorer/DPI 抖动。
-  // 各点把 isSkipTaskbar() 真实值落盘到 pet-window-debug.log，便于事后核验
+  // 注意：BrowserWindow 没有 isSkipTaskbar() getter，调用会抛 TypeError 中断后续
+  // createTray（导致托盘图标消失），这里只记录动作与可见性（isVisible 是合法 API）
   petWindow.setSkipTaskbar(true)
-  debugLog(`[PetWindow] 创建后 skipTaskbar=${petWindow.isSkipTaskbar()}`)
+  debugLog(`[PetWindow] 创建后 setSkipTaskbar(true)`)
 
   petWindow.once('ready-to-show', () => {
     petWindow.setSkipTaskbar(true)
-    debugLog(`[PetWindow] ready-to-show skipTaskbar=${petWindow.isSkipTaskbar()}`)
     petWindow.show()
-    debugLog(`[PetWindow] show 后 skipTaskbar=${petWindow.isSkipTaskbar()}`)
+    debugLog(`[PetWindow] ready-to-show 已 show，isVisible=${petWindow.isVisible()}`)
     setTimeout(() => {
       if (petWindow && !petWindow.isDestroyed()) {
         petWindow.setSkipTaskbar(true)
-        debugLog(`[PetWindow] 兜底重申 skipTaskbar=${petWindow.isSkipTaskbar()}`)
+        debugLog(`[PetWindow] 兜底重申 setSkipTaskbar(true)，isVisible=${petWindow.isVisible()}`)
       }
     }, 1500)
   })
