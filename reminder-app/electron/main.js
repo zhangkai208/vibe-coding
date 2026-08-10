@@ -224,6 +224,41 @@ function startDisplayWatchdog() {
   runDisplayWatchdog('boot', true)
 }
 
+// ===== 宠物窗口渲染进程就绪看门狗 =====
+// 开机自启时渲染进程初始化可能卡住（页面/JS 加载慢或失败），导致宠物组件不挂载、
+// 提醒时不弹宠物（用户只能手动重启应用）。渲染进程初始化完成会发 'pet-renderer-ready'；
+// 主进程在窗口创建后设超时，超时未收到则 reload 重新加载（限次防死循环）。
+const PET_READY_TIMEOUT = 30 * 1000
+const MAX_PET_RELOAD = 2
+let petReadyTimer = null
+let petReloadCount = 0
+
+function armPetReadyWatchdog() {
+  if (petReadyTimer) clearTimeout(petReadyTimer)
+  petReadyTimer = setTimeout(() => {
+    petReadyTimer = null
+    if (!petWindow || petWindow.isDestroyed()) return
+    if (petReloadCount >= MAX_PET_RELOAD) {
+      debugLog(`[PetWindow] 渲染进程 ${PET_READY_TIMEOUT / 1000}s 未就绪，已达 reload 上限(${MAX_PET_RELOAD})，放弃自愈`)
+      return
+    }
+    petReloadCount++
+    debugLog(`[PetWindow] 渲染进程 ${PET_READY_TIMEOUT / 1000}s 未就绪，第 ${petReloadCount} 次 reload 自愈`)
+    petWindow.webContents.reload()
+    armPetReadyWatchdog()
+  }, PET_READY_TIMEOUT)
+}
+
+function onPetRendererReady() {
+  if (petReadyTimer) {
+    clearTimeout(petReadyTimer)
+    petReadyTimer = null
+  }
+  const reloaded = petReloadCount
+  petReloadCount = 0
+  debugLog(`[PetWindow] 渲染进程就绪${reloaded ? `（经 ${reloaded} 次 reload 后恢复）` : ''}`)
+}
+
 // 创建宠物窗口（透明，始终置顶）
 function createPetWindow() {
   const workArea = screen.getPrimaryDisplay().workArea
@@ -283,6 +318,9 @@ function createPetWindow() {
       }
     }, 1500)
   })
+
+  // 渲染进程就绪看门狗：若 PET_READY_TIMEOUT 内没收到 pet-renderer-ready，reload 自愈
+  armPetReadyWatchdog()
 
   // 屏幕分辨率/DPI/显示器插拔变化时，把窗口重新铺满到正确工作区（见 refitPetWindow），
   // 同时刷新显示器指纹、标记 screen 模块可信（给开机自启看门狗判断用）。
@@ -440,6 +478,16 @@ function getNextReminderInfo(settings) {
 }
 
 // ===== IPC 通信处理 =====
+
+// 渲染进程诊断日志（打包后 console.log 会丢，渲染进程经此通道写入同一份日志文件）
+ipcMain.on('renderer-log', (_event, msg) => {
+  debugLog(`[PetRenderer] ${msg}`)
+})
+
+// 宠物窗口渲染进程就绪信号（清除就绪看门狗超时）
+ipcMain.on('pet-renderer-ready', () => {
+  onPetRendererReady()
+})
 
 // ===== 自定义标题栏：窗口控制 =====
 ipcMain.on('window-minimize', () => {

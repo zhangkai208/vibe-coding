@@ -48,6 +48,7 @@ function handleMouseMove(e) {
 }
 
 function handleIPCMessage(event, data) {
+  window.electronAPI?.rendererLog?.(`收到 pet-message type=${data?.type}`)
   if (data.type === 'trigger-reminder') {
     if (petStore.displayMode === 'reminder-only' && !petsVisible.value) {
       petsVisible.value = true
@@ -57,6 +58,7 @@ function handleIPCMessage(event, data) {
     const position = data.position || 'left'
     const speakingPet = position === 'left' ? leftPetRef.value : rightPetRef.value
     const otherPet = position === 'left' ? rightPetRef.value : leftPetRef.value
+    window.electronAPI?.rendererLog?.(`trigger-reminder position=${position} leftRef=${!!leftPetRef.value} rightRef=${!!rightPetRef.value} speakingPet=${!!speakingPet}`)
 
     // 说话的宠物显示气泡
     if (speakingPet) speakingPet.triggerReminder(data)
@@ -115,11 +117,18 @@ function savePetPosition(side, pos) {
 }
 
 onMounted(async () => {
+  const log = (m) => window.electronAPI?.rendererLog?.(m)
+  // 全局错误捕获：渲染进程任何未捕获异常都写进主进程日志，便于定位"提醒不弹"类问题
+  window.addEventListener('error', (e) => log(`[error] ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`))
+  window.addEventListener('unhandledrejection', (e) => log(`[unhandledrejection] ${e.reason && (e.reason.stack || e.reason.message) || e.reason}`))
+
+  log('PetApp onMounted 开始')
   // 监听鼠标移动实现穿透控制
   document.addEventListener('mousemove', handleMouseMove)
 
   try {
     const settings = await settingsStore.loadSettings()
+    log(`loadSettings 完成 displayMode=${settings?.pet?.displayMode} happiness=${settings?.pet?.happiness}`)
     if (settings?.pet) {
       petStore.happiness = settings.pet.happiness ?? 50
       petStore.updateMood()  // 启动即按存盘的好感度算出心情，叠加层第一帧就是对的脸色
@@ -137,12 +146,20 @@ onMounted(async () => {
       leftInitialPos.value = positions.left || null
       rightInitialPos.value = positions.right || null
     }
-  } catch {}
+  } catch (e) {
+    log(`loadSettings 出错：${e && (e.stack || e.message || e)}`)
+  }
   ready.value = true
+  log(`ready=true，Live2DPet 将挂载 petsVisible=${petsVisible.value}`)
 
   if (window.electronAPI?.onPetMessage) {
     window.electronAPI.onPetMessage(handleIPCMessage)
+    log('已挂 onPetMessage 监听')
   }
+
+  // 通知主进程渲染进程就绪（清除就绪看门狗；开机自启渲染进程卡住时主进程会 reload 自愈）
+  window.electronAPI?.petRendererReady?.()
+  log('已发 pet-renderer-ready')
 })
 
 onUnmounted(() => {

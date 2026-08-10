@@ -98,6 +98,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   closeWindow: () => ipcRenderer.send('window-close'),
 
+  // ===== 渲染进程诊断与就绪信号 =====
+  // 渲染进程关键状态/错误经此通道写入主进程的 pet-window-debug.log（打包后 console.log 会丢）
+  rendererLog: (msg) => ipcRenderer.send('renderer-log', msg),
+  // 渲染进程初始化完成时通知主进程（清除就绪看门狗超时；超时主进程会 reload 自愈）
+  petRendererReady: () => ipcRenderer.send('pet-renderer-ready'),
+
   // ===== 平台信息 =====
   platform: process.platform
 })
