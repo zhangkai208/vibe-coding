@@ -128,7 +128,7 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production，�
 
 **上述 refit 全都信任 `screen` 模块，但开机自启/休眠唤醒后 `screen` 本身可能整体停在错误读数**（如实际 1707×912@1.5 却一直报 1920×1080@1，且 `display-metrics-changed` 不补发）——此时 refit 空转，永远修不好。兜底是 `runDisplayWatchdog(trigger, allowRelaunch)`：上次正常会话的显示器指纹持久化在 electron-store 的 `lastDisplaySignature` key；`--hidden` 自启和 `resume`/`unlock-screen` 时若读数与指纹不符，轮询等 90 秒，等不来任何 display 事件就判定读数陈旧、`app.relaunch()` 静默重启一次（重启参数强制带 `--hidden`，并带 `--dpi-relaunched` 标记防循环；boot 场景重启后仍不符则接受当前读数——视为用户真的换了屏；唤醒时主窗口正被使用则不重启只等事件）。指纹比对宽高容忍 ±2px（Windows 缩放下 workArea 有 1707/1708 抖动）。另：宠物窗口是透明（layered）窗口，Windows 上其构造选项 `skipTaskbar` 不可靠——开机自启时 explorer/DPI 未就绪的竞态下会钻进任务栏，形成"点了没反应的幽灵图标"（`focusable:false` 导致点不动）。单靠 `refitPetWindow` 的重申不够（refit 只在冒气泡/显示器事件时才跑，开机后到首次冒气泡之间没有重申机会）。`createPetWindow` 用三道防线确保不进任务栏：构造 `show:false`、创建后立即显式 `setSkipTaskbar(true)`、`ready-to-show` 里"先 skip 再 show"且 show 后 1.5s 兜底重申一次；各点把执行动作与 `isVisible()` 落盘到 `pet-window-debug.log` 便于核验。注意 BrowserWindow **没有 `isSkipTaskbar()` getter**，调用会抛 TypeError 中断后续 `createTray`（托盘图标消失），切勿使用。主窗口静默启动期间也 skipTaskbar、`show` 时恢复。
 
-排查这类问题看 `%APPDATA%/reminder-app`（`userData`）下的 `pet-window-debug.log`——打包后没有终端、`console.log` 会丢，主进程把 bounds 失配诊断落盘到这里（仅真失配时记录，不刷屏）。
+排查这类问题看 `%APPDATA%/reminder-app`（`userData`）下的 `pet-window-debug.log`——打包后没有终端、`console.log` 会丢，主进程把 bounds 失配诊断落盘到这里（仅真失配时记录，不刷屏）。渲染进程（`PetApp.vue`）的关键状态（onMounted / loadSettings / 收到 IPC / 未捕获错误）也经 `renderer-log` 通道汇入同一份日志（前缀 `[PetRenderer]`），补齐渲染进程的日志盲区。此外宠物窗口渲染进程有**就绪看门狗**：`PetApp` 初始化完成会发 `pet-renderer-ready`，主进程在窗口创建后设 30s 超时，超时未收到（开机自启渲染进程卡住、提醒不弹宠物）则 `webContents.reload()` 自愈，限 2 次防死循环。
 
 ### 宠物拖动位置持久化
 
