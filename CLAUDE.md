@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 「提醒小助手」——一个带 Live2D 桌面宠物（左 22、右 33 两只萌妹）的提醒工具。由宠物弹对话气泡提醒喝水/休息，按时确认则开心、忽略则掉好感。Electron 41 + Vue 3 (script setup) + Vite + Element Plus + Pinia + pixi-live2d-display (PixiJS 6) + electron-store。
 
-主代码在 `reminder-app/`。详细设计文档见 `PROJECT_PLAN.md`。
+主代码在 `reminder-app/`。详细设计文档见 `PROJECT_PLAN.md`，用户向介绍见 `README.md`。仅面向 Windows 开发与打包（NSIS；大量窗口自愈逻辑是 Windows 特定的，不要引入依赖其他平台的方案）。
 
 ## 常用命令
 
@@ -130,9 +130,11 @@ npm run electron:preview # 跑打包后的 dist 产物（NODE_ENV=production，�
 
 排查这类问题看 `%APPDATA%/reminder-app`（`userData`）下的 `pet-window-debug.log`——打包后没有终端、`console.log` 会丢，主进程把 bounds 失配诊断落盘到这里（仅真失配时记录，不刷屏）。渲染进程（`PetApp.vue`）的关键状态（onMounted / loadSettings / 收到 IPC / 未捕获错误）也经 `renderer-log` 通道汇入同一份日志（前缀 `[PetRenderer]`），补齐渲染进程的日志盲区。此外宠物窗口渲染进程有**就绪看门狗**：`PetApp` 初始化完成会发 `pet-renderer-ready`，主进程在窗口创建后设 30s 超时，超时未收到（开机自启渲染进程卡住、提醒不弹宠物）则 `webContents.reload()` 自愈，限 2 次防死循环。
 
+**explorer.exe 崩溃/重启是另一类必须自愈的故障**（2026-08-19 实锤，事件日志显示本机 explorer 每天崩溃 1~2 次，ucrtbase.dll 0xc0000409）：任务栏随 explorer 整体重建，窗口的 skipTaskbar 注册随之蒸发——宠物窗口以 "Live2D Pet" 幽灵图标挤进任务栏（`focusable:false` 点不动）、隐藏在托盘的主窗口被翻成「可见+最小化」、透明窗口的合成表面失效（宠物消失、切常驻也收不到 IPC 的半死态）。Electron 不处理 Windows 的 `TaskbarCreated` 广播，`watchExplorerRestart()` 用异步 tasklist 每 15 秒轮询 explorer 的 pid，变化即自愈：宠物窗口 `hide → setSkipTaskbar(false) → setSkipTaskbar(true) → show → bringPetToFront`——**直接重申 skip(true) 对已冒出来的按钮无效，必须先 false 再 true 强制对新任务栏重走一遍注册两端**；主窗口靠 `mainWindowHiddenByTray` 标志（close 到托盘/--hidden 时置 true，`show` 事件置 false）识别「本应隐藏却被翻出」并重新 hide。日志看 `[ExplorerWatch]` 前缀。Win+D/Win+M 都**不会**触发此问题（显示桌面豁免该窗口），别往那个方向排查。
+
 ### 宠物拖动位置持久化
 
-左右宠物各自可拖动，落点存在设置的 `pet.positions.{left,right}`（`null` = 没拖过，用组件内默认的左下/右下角位置）。拖动结束时 `Live2DPet.vue` emit `position-changed`，`PetApp.vue` 按侧调 `saveSettings({ pet: { positions: { [side]: pos } } })`——靠 `save-settings` 的深度合并，改一侧不影响另一侧；启动时从设置恢复传入 `initialPos` prop。注意：`pet.position`（单数）是旧字段，已废弃不使用。
+左右宠物各自可拖动，落点存在设置的 `pet.positions.{left,right}`（`null` = 没拖过，用组件内默认的左下/右下角位置）。拖动结束时 `Live2DPet.vue` emit `position-changed`，`PetApp.vue` 按侧调 `saveSettings({ pet: { positions: { [side]: pos } } })`——靠 `save-settings` 的深度合并，改一侧不影响另一侧；启动时从设置恢复传入 `initialPos` prop。注意：`pet.position`（单数）是旧的全局位置字段，宠物窗口已不消费（落点只认 `pet.positions.{left,right}`），但 `App.vue` 的 `saveAllState` 与启动恢复仍在读写它——遗留兼容字段，别当真使用；要清理需同时改 `App.vue` 的读写两处及主进程 `get-settings` 默认值。
 
 ### 单实例锁
 

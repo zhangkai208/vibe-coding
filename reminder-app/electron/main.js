@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, powerMonitor, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { execFile } = require('child_process')
 const Store = require('electron-store')
 
 // 初始化本地存储
@@ -46,6 +47,9 @@ let petWindow = null
 let tray = null
 // 是否正在退出应用（区分“真正退出”和“关闭按钮最小化到托盘”）
 let isQuitting = false
+// 主窗口当前是否「应该」隐藏在托盘（close 到托盘 / --hidden 静默启动时为 true；show 时为 false）。
+// explorer 重启会把隐藏在托盘的主窗口翻成“可见+最小化”挤进任务栏，靠此标志识别并收回
+let mainWindowHiddenByTray = false
 
 // 创建主窗口
 function createMainWindow() {
@@ -72,8 +76,14 @@ function createMainWindow() {
 
   // 静默自启时主窗口虽不 show，但 Windows 偶发会给它留一个点了没反应的任务栏
   // 幽灵图标；隐藏期先 skipTaskbar，真正显示时再恢复正常任务栏行为
-  if (startHidden) mainWindow.setSkipTaskbar(true)
-  mainWindow.on('show', () => mainWindow.setSkipTaskbar(false))
+  if (startHidden) {
+    mainWindow.setSkipTaskbar(true)
+    mainWindowHiddenByTray = true
+  }
+  mainWindow.on('show', () => {
+    mainWindow.setSkipTaskbar(false)
+    mainWindowHiddenByTray = false
+  })
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173')
@@ -90,6 +100,7 @@ function createMainWindow() {
     if (settings.closeToTray !== false) {
       event.preventDefault()
       mainWindow.hide()
+      mainWindowHiddenByTray = true
     } else {
       isQuitting = true
       app.quit()
@@ -257,6 +268,60 @@ function onPetRendererReady() {
   const reloaded = petReloadCount
   petReloadCount = 0
   debugLog(`[PetWindow] 渲染进程就绪${reloaded ? `（经 ${reloaded} 次 reload 后恢复）` : ''}`)
+}
+
+// ===== explorer 重启看门狗 =====
+// 背景（2026-08-19 实锤）：本机 explorer.exe 频繁崩溃重启（事件日志每天 1~2 次，
+// ucrtbase.dll 0xc0000409，多为第三方 shell 扩展污染所致）。任务栏随 explorer 整体重建，
+// 但窗口的 skipTaskbar 注册不会自动恢复——宠物窗口以 "Live2D Pet" 幽灵图标挤进任务栏
+// （focusable:false 点不动），隐藏在托盘的主窗口也被翻成“可见+最小化”占任务栏，且桌面
+// 合成器重建会让透明窗口的渲染表面失效（宠物消失）。Electron 不处理 Windows 的
+// TaskbarCreated 广播，只能轮询 explorer 的 pid 变化来发现重启并自愈。
+// 用 tasklist 查询（异步、windowsHide 不闪窗），CSV 行形如 "explorer.exe","1234",...
+function queryExplorerPid() {
+  return new Promise((resolve) => {
+    execFile('tasklist', ['/FO', 'CSV', '/NH', '/FI', 'IMAGENAME eq explorer.exe'],
+      { windowsHide: true }, (err, stdout) => {
+      if (err) return resolve(null)
+      const m = stdout.match(/"explorer\.exe","(\d+)"/i)
+      resolve(m ? Number(m[1]) : null)
+    })
+  })
+}
+
+async function watchExplorerRestart() {
+  let lastPid = await queryExplorerPid()
+  debugLog(`[ExplorerWatch] 基线 explorer pid=${lastPid}`)
+  setInterval(async () => {
+    try {
+      const pid = await queryExplorerPid()
+      if (pid === null) return                    // explorer 不在（崩溃后未拉起的空窗期）或查询失败
+      if (lastPid === null) { lastPid = pid; return }  // 首次拿到基线，不算重启
+      if (pid === lastPid) return                 // pid 未变，无事发生
+
+      const oldPid = lastPid
+      lastPid = pid
+      debugLog(`[ExplorerWatch] 检测到 explorer 重启(${oldPid}→${pid})，自愈窗口任务栏注册`)
+
+      // 宠物窗口：hide → skip(false) → skip(true) → show。explorer 重启后旧的
+      // skipTaskbar 注册已随旧任务栏蒸发，直接重申 skip(true) 对已冒出来的按钮无效，
+      // 必须先 false 再 true 强制对新任务栏完整重走一遍注册两端；hide/show 重建合成
+      // 表面（修「切常驻也没反应」的半死窗口）；bringPetToFront 校准 bounds 与置顶
+      if (petWindow && !petWindow.isDestroyed()) {
+        petWindow.hide()
+        petWindow.setSkipTaskbar(false)
+        petWindow.setSkipTaskbar(true)
+        petWindow.show()
+        bringPetToFront()
+        debugLog('[ExplorerWatch] 宠物窗口已重新注册 skipTaskbar 并拉回最前')
+      }
+      // 主窗口：本应隐藏在托盘、却被任务栏重建翻成“可见+最小化” → 收回托盘
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindowHiddenByTray && mainWindow.isVisible()) {
+        debugLog('[ExplorerWatch] 主窗口被任务栏重建翻出，重新隐藏到托盘')
+        mainWindow.hide()
+      }
+    } catch { /* 单轮失败忽略，下一轮轮询再试 */ }
+  }, 15 * 1000)
 }
 
 // 创建宠物窗口（透明，始终置顶）
@@ -745,6 +810,7 @@ app.whenReady().then(() => {
   createTray()
   startIdleMonitor()
   startDisplayWatchdog()
+  watchExplorerRestart()
 
   // 设置开机自启
   const settings = store.get('settings', {})
