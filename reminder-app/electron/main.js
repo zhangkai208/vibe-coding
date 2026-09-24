@@ -122,16 +122,25 @@ function createMainWindow() {
 // 按主显示器工作区把宠物窗口铺满。开机自启时显卡驱动/DPI/多显示器往往还没就绪，
 // 此时拿到的 workArea 是临时的小值——屏幕稳定后会触发 display-metrics-changed，
 // 由本函数把窗口重新铺满到正确尺寸（否则宠物会挤在屏幕左上角的小区域里、显得变小）
+// 宽高 ±2px 视为一致（与 signatureMatches 同一容差）：150% 缩放下 workArea 报 1707、
+// 窗口 getBounds 恒为 1708（设备像素取整，setBounds 写 1707 也收不回来），逐字节比较
+// 会把每次 refit 都误判成失配——既刷屏日志又空跑 setBounds
+function boundsMatchWorkArea(old, target) {
+  return old.x === target.x && old.y === target.y &&
+    Math.abs(old.width - target.width) <= 2 &&
+    Math.abs(old.height - target.height) <= 2
+}
+
 function refitPetWindow() {
   if (!petWindow || petWindow.isDestroyed()) return
   const display = screen.getPrimaryDisplay()
-  const { x, y, width, height } = display.workArea
+  const target = display.workArea
   const old = petWindow.getBounds()
-  // 仅在 bounds 真的与工作区不一致时记录（真正失配的时刻），避免每次冒气泡都刷日志
-  if (old.x !== x || old.y !== y || old.width !== width || old.height !== height) {
-    debugLog(`[PetWindow] bounds 失配，纠正 old=${JSON.stringify(old)} new=${JSON.stringify({ x, y, width, height })} scaleFactor=${display.scaleFactor}`)
+  // 仅在真失配（超出容差）时才 setBounds + 记录；容差内的 1px 取整抖动不算失配
+  if (!boundsMatchWorkArea(old, target)) {
+    debugLog(`[PetWindow] bounds 失配，纠正 old=${JSON.stringify(old)} new=${JSON.stringify(target)} scaleFactor=${display.scaleFactor}`)
+    petWindow.setBounds(target)
   }
-  petWindow.setBounds({ x, y, width, height })
   // Windows 在 DPI 变化/启动早期偶发弄丢 skipTaskbar，任务栏会多出一个点了没反应的
   // 幽灵图标（focusable:false 的本窗口点击无响应）。这里幂等重申，借每次 refit 自愈
   petWindow.setSkipTaskbar(true)
@@ -303,25 +312,50 @@ async function watchExplorerRestart() {
       lastPid = pid
       debugLog(`[ExplorerWatch] 检测到 explorer 重启(${oldPid}→${pid})，自愈窗口任务栏注册`)
 
-      // 宠物窗口：hide → skip(false) → skip(true) → show。explorer 重启后旧的
-      // skipTaskbar 注册已随旧任务栏蒸发，直接重申 skip(true) 对已冒出来的按钮无效，
-      // 必须先 false 再 true 强制对新任务栏完整重走一遍注册两端；hide/show 重建合成
-      // 表面（修「切常驻也没反应」的半死窗口）；bringPetToFront 校准 bounds 与置顶
-      if (petWindow && !petWindow.isDestroyed()) {
-        petWindow.hide()
-        petWindow.setSkipTaskbar(false)
-        petWindow.setSkipTaskbar(true)
-        petWindow.show()
-        bringPetToFront()
-        debugLog('[ExplorerWatch] 宠物窗口已重新注册 skipTaskbar 并拉回最前')
-      }
-      // 主窗口：本应隐藏在托盘、却被任务栏重建翻成“可见+最小化” → 收回托盘
-      if (mainWindow && !mainWindow.isDestroyed() && mainWindowHiddenByTray && mainWindow.isVisible()) {
-        debugLog('[ExplorerWatch] 主窗口被任务栏重建翻出，重新隐藏到托盘')
-        mainWindow.hide()
-      }
+      // 宠物窗口 hide → skip(false) → skip(true) → show、主窗口收回托盘，见 reRegisterPetWindow
+      reRegisterPetWindow('[ExplorerWatch]')
     } catch { /* 单轮失败忽略，下一轮轮询再试 */ }
   }, 15 * 1000)
+}
+
+// 完整重注册序列，explorer 看门狗与开机自愈（schedulePetBootHeal）共用。
+// 必须走 hide → skip(false) → skip(true) → show：explorer 重启/晚建后旧的 skipTaskbar
+// 注册已随旧任务栏蒸发，直接重申 skip(true) 对已冒出来的按钮无效，先 false 再 true
+// 才能强制对新任务栏完整重走一遍注册两端；hide/show 重建透明窗口的合成表面（修
+// 「宠物消失、切常驻也没反应」的半死窗口）；bringPetToFront 校准 bounds 与置顶。
+// 主窗口本应隐藏在托盘、却被任务栏重建翻成「可见+最小化」时一并收回
+function reRegisterPetWindow(tag) {
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.hide()
+    petWindow.setSkipTaskbar(false)
+    petWindow.setSkipTaskbar(true)
+    petWindow.show()
+    bringPetToFront()
+    debugLog(`${tag} 宠物窗口已重新注册 skipTaskbar 并拉回最前`)
+  }
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindowHiddenByTray && mainWindow.isVisible()) {
+    debugLog(`${tag} 主窗口被任务栏重建翻出，重新隐藏到托盘`)
+    mainWindow.hide()
+  }
+}
+
+// ===== 开机自启后的宠物窗口定时自愈 =====
+// 快速启动的开机会话里，任务栏/DWM 的初始化可能晚于自启的应用：三道防线的 skipTaskbar
+// 登记落在任务栏建成之前（幽灵图标）、透明窗口合成表面出生即坏（宠物不显示），而
+// explorer 没有重启（pid 不变）时 explorer 看门狗不会触发——日志里所有动作都「成功」，
+// 故障却真实存在，只能靠用户手动重启应用恢复（2026-09-15/16/17 日志实锤：三次开机后
+// 60~96 秒内的手动退出重开）。对策：--hidden 会话在宠物窗口 show 后 20s/60s 各做一次
+// one-shot 完整重注册，此时桌面必已就绪，等价于替用户自动做一次「托盘退出再打开」
+const PET_BOOT_HEAL_DELAYS_MS = [20 * 1000, 60 * 1000]
+let petBootHealScheduled = false
+
+function schedulePetBootHeal() {
+  if (!startHidden || petBootHealScheduled) return
+  petBootHealScheduled = true
+  debugLog(`[PetWindow] --hidden 自启，排定开机自愈：show 后 ${PET_BOOT_HEAL_DELAYS_MS.map(d => d / 1000).join('/')} 秒各做一次完整重注册`)
+  for (const delay of PET_BOOT_HEAL_DELAYS_MS) {
+    setTimeout(() => reRegisterPetWindow('[PetWindow]'), delay)
+  }
 }
 
 // 创建宠物窗口（透明，始终置顶）
@@ -376,6 +410,8 @@ function createPetWindow() {
     petWindow.setSkipTaskbar(true)
     petWindow.show()
     debugLog(`[PetWindow] ready-to-show 已 show，isVisible=${petWindow.isVisible()}`)
+    // --hidden 自启会话：从这次 show 起排定 20s/60s 两次开机自愈（见 schedulePetBootHeal）
+    schedulePetBootHeal()
     setTimeout(() => {
       if (petWindow && !petWindow.isDestroyed()) {
         petWindow.setSkipTaskbar(true)
